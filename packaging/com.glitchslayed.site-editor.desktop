@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Blog Editor
+Comment=Edit and publish your Astro website locally
+Exec=glitchys-site-editor
+Icon=com.glitchslayed.site-editor
+Terminal=false
+Type=Application
+Categories=Development;WebDevelopment;
+StartupNotify=true

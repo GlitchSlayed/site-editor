@@ -1,0 +1,86 @@
+name: Build and Release Flatpak
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Publish a GitHub Release'
+        required: false
+        type: boolean
+        default: false
+      tag_name:
+        description: 'Tag name for the release (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-flatpak:
+    name: Build Flatpak Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build frontend bundle
+        run: npm run build
+
+      - name: Install Flatpak and GNOME 49 SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.gnome.Platform//49 org.gnome.Sdk//49 org.gnome.Sdk.Extension.rust-stable//49
+
+      - name: Compile native binary in GNOME 49 SDK
+        run: |
+          flatpak run --filesystem=host --command=bash org.gnome.Sdk -c "
+            cd '$GITHUB_WORKSPACE/src-tauri'
+            export PATH='/usr/lib/sdk/rust-stable/bin:$PATH'
+            cargo build --release
+          "
+
+      - name: Stage Flatpak assets
+        run: |
+          stage="src-tauri/target/flatpak-stage"
+          mkdir -p "$stage/bin" "$stage/share/applications" "$stage/share/icons/hicolor/scalable/apps" "$stage/share/metainfo"
+          install -Dm755 src-tauri/target/release/glitchys-site-editor "$stage/bin/glitchys-site-editor"
+          install -Dm644 packaging/com.glitchslayed.site-editor.desktop "$stage/share/applications/com.glitchslayed.site-editor.desktop"
+          install -Dm644 packaging/icons/hicolor/scalable/apps/com.glitchslayed.site-editor.svg "$stage/share/icons/hicolor/scalable/apps/com.glitchslayed.site-editor.svg"
+          install -Dm644 packaging/com.glitchslayed.site-editor.metainfo.xml "$stage/share/metainfo/com.glitchslayed.site-editor.metainfo.xml"
+
+      - name: Build Flatpak repository and bundle
+        run: |
+          flatpak-builder --user --force-clean --repo=repo build-dir packaging/com.glitchslayed.site-editor.yml
+          flatpak build-bundle repo glitchys-site-editor.flatpak com.glitchslayed.site-editor master \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Upload Flatpak Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: glitchys-site-editor-flatpak
+          path: glitchys-site-editor.flatpak
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.tag_name }}
+          files: glitchys-site-editor.flatpak
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.tag_name }}
+          generate_release_notes: true

@@ -1,0 +1,26 @@
+app-id: com.glitchslayed.site-editor
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: glitchys-site-editor
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=network
+  - --talk-name=org.freedesktop.Flatpak
+  - --socket=ssh-auth
+modules:
+  - name: site-editor
+    buildsystem: simple
+    build-options:
+      append-path: /usr/bin
+    build-commands:
+      - install -Dm755 bin/glitchys-site-editor /app/bin/glitchys-site-editor
+      - install -Dm644 share/applications/com.glitchslayed.site-editor.desktop /app/share/applications/com.glitchslayed.site-editor.desktop
+      - install -Dm644 share/icons/hicolor/scalable/apps/com.glitchslayed.site-editor.svg /app/share/icons/hicolor/scalable/apps/com.glitchslayed.site-editor.svg
+      - install -Dm644 share/metainfo/com.glitchslayed.site-editor.metainfo.xml /app/share/metainfo/com.glitchslayed.site-editor.metainfo.xml
+    sources:
+      - type: dir
+        path: ../src-tauri/target/flatpak-stage

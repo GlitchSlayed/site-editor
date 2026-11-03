@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Dialog access for selecting a local repository. Filesystem and process operations are implemented by bounded Rust commands.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default", "dialog:allow-open", "opener:default"]
+}
