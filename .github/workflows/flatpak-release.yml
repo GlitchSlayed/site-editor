@@ -49,7 +49,7 @@ jobs:
 
       - name: Compile native binary in GNOME 49 SDK
         run: |
-          flatpak run --env=FLATPAK_ENABLE_SDK_EXT=rust-stable --filesystem=host --command=bash org.gnome.Sdk -c "
+          flatpak run --share=network --env=FLATPAK_ENABLE_SDK_EXT=rust-stable --filesystem=host --command=bash org.gnome.Sdk -c "
             cd '$GITHUB_WORKSPACE/src-tauri'
             export PATH='/usr/lib/sdk/rust-stable/bin:$PATH'
             cargo build --release
