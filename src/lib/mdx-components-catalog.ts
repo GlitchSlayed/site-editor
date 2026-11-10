@@ -6,13 +6,77 @@
 export interface MdxComponentSnippet {
   id: string;
   name: string;
-  category: 'Scientific Plot' | 'Control' | 'Metric & KPI' | 'Data Table' | 'Code & Exec' | 'Overlay';
+  category: 'Scientific Plot' | 'Control' | 'Metric & KPI' | 'Data Table' | 'Code & Exec' | 'Overlay' | 'Engineering Monograph' | 'Mathematical';
   description: string;
   snippet: string;
   importStatement: string;
 }
 
 export const MDX_COMPONENTS_CATALOG: MdxComponentSnippet[] = [
+  {
+    id: 'engineering-note',
+    name: 'EngineeringNote',
+    category: 'Engineering Monograph',
+    description: 'Archival callout for design decisions, assumptions, limitations, or observations',
+    importStatement: "import { EngineeringNote } from '@components/mdx';",
+    snippet: `<EngineeringNote kind="decision" title="Airfoil Selection: Supercritical SC(2)-0714">
+  Selected NASA SC(2)-0714 section to delay drag divergence to Mach 0.83 while preserving 14% thickness-to-chord for wing root spars.
+</EngineeringNote>`,
+  },
+  {
+    id: 'equation-block',
+    name: 'EquationBlock',
+    category: 'Mathematical',
+    description: 'Formal mathematical block with LaTeX typesetting, reference label, and variable dictionary',
+    importStatement: "import { EquationBlock } from '@components/mdx';",
+    snippet: `<EquationBlock
+  equation="L = \\frac{1}{2} \\rho v^2 S C_L"
+  label="(Eq. 1)"
+  description="Classical aerodynamic lift equation representing resultant force normal to freestream velocity."
+  variables={[
+    { symbol: "L", meaning: "Lift force", unit: "N" },
+    { symbol: "\\rho", meaning: "Fluid density", unit: "kg/m³" },
+    { symbol: "v", meaning: "Freestream velocity", unit: "m/s" },
+    { symbol: "S", meaning: "Wing reference area", unit: "m²" },
+    { symbol: "C_L", meaning: "Lift coefficient" }
+  ]}
+/>`,
+  },
+  {
+    id: 'measurement',
+    name: 'Measurement',
+    category: 'Metric & KPI',
+    description: 'Empirical measurement card with explicit uncertainty bounds, method, and test conditions',
+    importStatement: "import { Measurement } from '@components/mdx';",
+    snippet: `<Measurement
+  label="Wing Static Tip Deflection"
+  value={42.8}
+  unit="mm"
+  uncertainty={0.4}
+  uncertaintyLabel="Laser photogrammetry uncertainty"
+  method="Laser triangulated photogrammetry"
+  conditions="Full aeroelastic limit load (2.5g)"
+  significantFigures={3}
+/>`,
+  },
+  {
+    id: 'heatmap-plot',
+    name: 'HeatmapPlot',
+    category: 'Scientific Plot',
+    description: '2D matrix intensity heatmap for spatial and aerodynamic gradients',
+    importStatement: "import { HeatmapPlot } from '@components/mdx';",
+    snippet: `<HeatmapPlot
+  title="Surface Pressure Coefficient Distribution (-Cp)"
+  xLabel="Spanwise Station (2y/b)"
+  yLabel="Chordwise Station (x/c)"
+  data={[
+    [-1.25, -1.10, -0.85, -0.45],
+    [-0.95, -0.75, -0.50, -0.20],
+    [-0.60, -0.40, -0.15,  0.10],
+    [-0.25, -0.05,  0.15,  0.30]
+  ]}
+/>`,
+  },
   {
     id: 'line-plot',
     name: 'LinePlot',

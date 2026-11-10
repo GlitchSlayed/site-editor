@@ -43,13 +43,48 @@ export const ArticlePreviewPane: React.FC<ArticlePreviewPaneProps> = ({
 
         {isMdx && (
           <div className="mdx-notice-banner">
-            <strong>Interactive MDX Article</strong>
+            <div className="mdx-banner-header">
+              <span className="mdx-banner-tag">MDX INTERACTIVE MONOGRAPH</span>
+            </div>
             <p>
-              Markdown and math equations ($/$$) render below. Interactive React visualization islands
-              (uPlot, Parameter Sliders, Three.js) run inside the live Astro preview server.
+              Markdown, KaTeX mathematical equations ($/$$), and Satteri engineering annotations render below. Interactive React data plots (uPlot, Parameter Sliders, Heatmaps) run inside the live Astro preview.
             </p>
           </div>
         )}
+
+        <header className="monograph-preview-header">
+          <div className="monograph-kicker-strip">
+            <span className="monograph-category">
+              {metadata.category
+                ? String(metadata.category).toUpperCase()
+                : selected.kind === 'Projects'
+                ? 'TECHNICAL PROJECT'
+                : 'MONOGRAPH DISPATCH'}
+            </span>
+            {metadata.date && (
+              <span className="monograph-date">
+                {new Date(String(metadata.date)).toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                })}
+              </span>
+            )}
+          </div>
+          <h1 className="monograph-preview-title">{String(metadata.title || 'Untitled')}</h1>
+          {metadata.description && (
+            <p className="monograph-preview-abstract">{String(metadata.description)}</p>
+          )}
+          {Array.isArray(metadata.tags) && metadata.tags.length > 0 && (
+            <div className="monograph-preview-tags">
+              {(metadata.tags as string[]).map(t => (
+                <span key={t} className="preview-tag-pill">
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+        </header>
 
         <article
           className="prose-preview"

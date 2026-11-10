@@ -1,5 +1,17 @@
 import React from 'react';
-import { Rocket, ChevronDown, FolderOpen, PanelLeftOpen, Palette, ExternalLink, Send } from 'lucide-react';
+import {
+  Feather,
+  ChevronDown,
+  FolderOpen,
+  PanelLeftOpen,
+  Palette,
+  ExternalLink,
+  Send,
+  Sun,
+  Moon,
+  ListTree,
+  Command,
+} from 'lucide-react';
 import { Button as ShadButton } from '@/components/ui/button';
 
 interface AppHeaderProps {
@@ -13,6 +25,11 @@ interface AppHeaderProps {
   schemaIssuesCount: number;
   native: boolean;
   liveSiteUrl: string;
+  theme: 'light' | 'dark';
+  outlineOpen: boolean;
+  onToggleTheme: () => void;
+  onToggleOutline: () => void;
+  onOpenShortcuts: () => void;
   onSelectRecent: (path: string) => void;
   onChooseRepository: () => void;
   onOpenSidebar: () => void;
@@ -32,6 +49,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   schemaIssuesCount,
   native,
   liveSiteUrl,
+  theme,
+  outlineOpen,
+  onToggleTheme,
+  onToggleOutline,
+  onOpenShortcuts,
   onSelectRecent,
   onChooseRepository,
   onOpenSidebar,
@@ -44,12 +66,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   return (
     <header className="topbar">
       <div className="brand">
-        <div className="brand-mark">
-          <Rocket size={19} />
+        <div className="brand-mark" title="Purpose — Technical Monograph Editor">
+          <Feather size={17} />
         </div>
-        <div>
-          <strong>Blog Editor</strong>
-          <span>Vansh’s Technical Blog</span>
+        <div className="brand-text">
+          <strong className="brand-title">Purpose</strong>
+          <span className="brand-kicker">TECHNICAL DISPATCH &amp; NOTEBOOK</span>
         </div>
       </div>
 
@@ -104,6 +126,32 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             ''
           )}
         </span>
+        <button
+          className={`button button-outline button-sm outline-trigger ${outlineOpen ? 'active' : ''}`}
+          onClick={onToggleOutline}
+          aria-label="Toggle Document Outline"
+          title="Toggle Document Outline (Ctrl+Shift+O)"
+        >
+          <ListTree size={14} />
+          <span>Outline</span>
+        </button>
+        <button
+          className="button button-outline button-sm theme-toggle-btn"
+          onClick={onToggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={theme === 'dark' ? 'Switch to light mode (Ctrl+Shift+T)' : 'Switch to dark mode (Ctrl+Shift+T)'}
+        >
+          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+          <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+        </button>
+        <button
+          className="icon-btn shortcuts-trigger"
+          onClick={onOpenShortcuts}
+          aria-label="View keyboard shortcuts"
+          title="Keyboard shortcuts (?)"
+        >
+          <Command size={14} />
+        </button>
         <button
           className="button button-outline button-sm appearance-trigger"
           onClick={onOpenAppearance}

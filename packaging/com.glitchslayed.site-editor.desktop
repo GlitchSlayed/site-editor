@@ -1,9 +1,10 @@
 [Desktop Entry]
-Name=Blog Editor
-Comment=Edit and publish your Astro website locally
+Name=Purpose
+GenericName=Technical Monograph Editor
+Comment=Technical Dispatch & Scientific Monograph Desktop Editor
 Exec=glitchys-site-editor
 Icon=com.glitchslayed.site-editor
 Terminal=false
 Type=Application
-Categories=Development;WebDevelopment;
+Categories=Development;WebDevelopment;Publishing;
 StartupNotify=true

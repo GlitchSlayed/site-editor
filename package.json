@@ -1,6 +1,8 @@
 {
-  "name": "glitchys-site-editor",
-  "version": "0.1.0",
+  "name": "purpose",
+  "productName": "Purpose",
+  "description": "Technical Dispatch & Scientific Monograph Desktop Editor",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {

@@ -20,6 +20,12 @@ describe('Editorial Rules & Audit Engine', () => {
     expect(issues.some(i => i.type === 'mdx-import')).toBe(true);
   });
 
+  it('detects missing imports for newly added engineering monograph components', () => {
+    const text = '<EngineeringNote kind="decision" title="Airfoil">Choice</EngineeringNote>';
+    const issues = auditEditorialText(text, true);
+    expect(issues.some(i => i.type === 'mdx-import' && i.replacement?.includes('EngineeringNote'))).toBe(true);
+  });
+
   it('does not flag missing MDX imports when properly imported', () => {
     const text = `import { LinePlot } from '@components/mdx';\n\n<LinePlot title="Test" series={[]} />`;
     const issues = auditEditorialText(text, true);

@@ -19,15 +19,17 @@ import {
   ExternalLink,
   Plus,
 } from 'lucide-react';
-import { parseSiteDocument, replaceMarkdownBody, serializeSiteDocument, validateMetadata, SiteMetadata } from './lib/site-adapter';
-import { auditEditorialText, fixAllEmDashes, EditorialIssue } from './lib/editorial-rules';
+import { parseSiteDocument, replaceMarkdownBody, serializeSiteDocument, validateMetadata, type SiteMetadata } from './lib/site-adapter';
+import { auditEditorialText, fixAllEmDashes, type EditorialIssue } from './lib/editorial-rules';
 import { initMiddleClickAutoscroll } from './lib/autoscroll';
 import { AppHeader } from './components/layout/AppHeader';
-import { ContentSidebar, Entry, Environment } from './components/sidebar/ContentSidebar';
+import { ContentSidebar, type Entry, type Environment } from './components/sidebar/ContentSidebar';
 import { MetadataEditor } from './components/editor/MetadataEditor';
 import { FormatToolbar } from './components/editor/FormatToolbar';
 import { EditorialAuditPanel } from './components/editor/EditorialAuditPanel';
 import { ArticlePreviewPane } from './components/preview/ArticlePreviewPane';
+import { DocumentOutlineDrawer, type HeadingItem } from './components/outline/DocumentOutlineDrawer';
+import { KeyboardShortcutsDialog } from './components/modals/KeyboardShortcutsDialog';
 import { RenameDialog } from './components/modals/RenameDialog';
 import { DuplicateDialog } from './components/modals/DuplicateDialog';
 import { DeleteDialog } from './components/modals/DeleteDialog';
@@ -124,12 +126,73 @@ function App() {
   const [previewAssets, setPreviewAssets] = useState<Record<string, string>>({});
   const [dropTarget, setDropTarget] = useState<'content' | 'visual' | null>(null);
 
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const stored = localStorage.getItem('purpose-theme');
+    return stored === 'dark' ? 'dark' : 'light';
+  });
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+
   const dirty = Boolean(selected) && (source !== savedSource || JSON.stringify(metadata) !== savedMetadata);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = 'dark';
-    document.documentElement.classList.add('dark');
-  }, []);
+    document.documentElement.dataset.theme = theme;
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('purpose-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const docTitle = metadata.title || selected?.title || '';
+    const titleStr = docTitle ? `Purpose — ${docTitle}${dirty ? ' ●' : ''}` : 'Purpose';
+    document.title = titleStr;
+    if (native) {
+      getCurrentWindow().setTitle(titleStr).catch(() => {});
+    }
+  }, [selected?.title, metadata.title, dirty, native]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInputFocused =
+        activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (selected && dirty && !busy) {
+          void save();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        setOutlineOpen(o => !o);
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        setWordWrap(w => !w);
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setSourceMode(sm => !sm);
+      } else if (e.key === '?' && !isInputFocused) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+      } else if (e.key === 'Escape') {
+        if (shortcutsOpen) setShortcutsOpen(false);
+        else if (outlineOpen) setOutlineOpen(false);
+        else if (appearanceDialog) setAppearanceDialog(false);
+        else if (publishDialog) setPublishDialog(false);
+        else if (newDialog) setNewDialog(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selected, dirty, busy, shortcutsOpen, outlineOpen, appearanceDialog, publishDialog, newDialog, source, metadata]);
 
   useEffect(() => {
     const hex = appAccent.slice(1);
@@ -209,17 +272,116 @@ function App() {
     }
   }, [native, repository, source, metadata.visualImage, previewAssets]);
 
+  const headings = useMemo<HeadingItem[]>(() => {
+    if (!body) return [];
+    const lines = body.split('\n');
+    const items: HeadingItem[] = [];
+    lines.forEach((line, idx) => {
+      const match = line.match(/^(#{1,3})\s+(.+)$/);
+      if (match) {
+        const level = match[1].length;
+        const text = match[2].trim().replace(/[*_`]/g, '');
+        const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+        items.push({ level, text, id, line: idx });
+      }
+    });
+    return items;
+  }, [body]);
+
+  const DEFAULT_SITE_TAGS = [
+    'Aerodynamics',
+    'Aeroelasticity',
+    'Airfoils',
+    'Avionics',
+    'CFD',
+    'Flight Control',
+    'Fluid Dynamics',
+    'Linux',
+    'Propulsion',
+    'Rust',
+    'Structures',
+    'Systems',
+    'Transonic',
+    'Wind Tunnel',
+  ];
+
+  const allRepoTags = useMemo(() => {
+    const set = new Set<string>(DEFAULT_SITE_TAGS);
+    if (Array.isArray(metadata.tags)) {
+      metadata.tags.forEach((t: unknown) => {
+        if (typeof t === 'string' && t.trim()) set.add(t.trim());
+      });
+    }
+    return Array.from(set).sort();
+  }, [metadata.tags]);
+
+  const wordsCount = useMemo(() => {
+    return body.trim() ? body.trim().split(/\s+/).length : 0;
+  }, [body]);
+
+  const readTimeMin = useMemo(() => {
+    return Math.max(1, Math.ceil(wordsCount / 220));
+  }, [wordsCount]);
+
+  const updateCursorPosition = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    const textBefore = el.value.substring(0, el.selectionStart);
+    const lines = textBefore.split('\n');
+    const line = lines.length;
+    const col = lines[lines.length - 1].length + 1;
+    setCursorPos({ line, col });
+  };
+
   const rendered = useMemo(() => {
-    const markdown = body.replace(
-      /\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g,
-      m => `<div class="math-preview">${escapeHtml(m)}</div>`
+    let markdown = body;
+
+    // Satteri percentage annotations in tables / text: (+12.4%), (-3.2%)
+    markdown = markdown.replace(
+      /\(\+([0-9.]+%?)\)/g,
+      '<span class="delta-badge delta-pos">(+$1)</span>'
     );
+    markdown = markdown.replace(
+      /\(-([0-9.]+%?)\)/g,
+      '<span class="delta-badge delta-neg">(-$1)</span>'
+    );
+
+    // Math preview blocks
+    markdown = markdown.replace(
+      /\$\$([\s\S]*?)\$\$/g,
+      (_m, eq: string) => `<div class="mdx-equation-preview"><div class="mdx-equation-math">${escapeHtml(eq)}</div></div>`
+    );
+    markdown = markdown.replace(
+      /\$([^$\n]+)\$/g,
+      (_m, eq: string) => `<code class="math-inline">${escapeHtml(eq)}</code>`
+    );
+
+    // EngineeringNote visual cards
+    markdown = markdown.replace(
+      /<EngineeringNote\s+kind="([^"]*)"(?:\s+title="([^"]*)")?>([\s\S]*?)<\/EngineeringNote>/g,
+      (_m, kind: string, title: string, content: string) =>
+        `<aside class="mdx-note-preview mdx-note-${escapeHtml(kind)}"><div class="mdx-note-kicker">${escapeHtml(kind)}</div>${title ? `<h4>${escapeHtml(title)}</h4>` : ''}<div>${content}</div></aside>`
+    );
+
+    // EquationBlock visual cards
+    markdown = markdown.replace(
+      /<EquationBlock[\s\S]*?equation="([^"]*)"[\s\S]*?description="([^"]*)"[\s\S]*?\/>/g,
+      (_m, eq: string, desc: string) =>
+        `<div class="mdx-equation-preview"><div class="mdx-equation-math">${escapeHtml(eq)}</div><div class="mdx-equation-desc">${escapeHtml(desc)}</div></div>`
+    );
+
+    // Measurement visual cards
+    markdown = markdown.replace(
+      /<Measurement[\s\S]*?label="([^"]*)"[\s\S]*?value=\{?([0-9.]+)\}?[\s\S]*?unit="([^"]*)"[\s\S]*?\/>/g,
+      (_m, label: string, value: string, unit: string) =>
+        `<div class="mdx-measurement-preview"><span class="mdx-measurement-lbl">${escapeHtml(label)}</span><span class="mdx-measurement-val">${escapeHtml(value)} ${escapeHtml(unit)}</span></div>`
+    );
+
     const html = marked.parse(markdown, { async: false }) as string;
     const withAssets = html.replace(/src="([^"]+)"/g, (_all, src: string) => {
       const asset = siteAssetPath(src);
       return `src="${asset && previewAssets[asset] ? previewAssets[asset] : src}"`;
     });
-    return DOMPurify.sanitize(withAssets);
+    return DOMPurify.sanitize(withAssets, { ADD_TAGS: ['aside'], ADD_ATTR: ['class'] });
   }, [body, previewAssets]);
 
   const validation = useMemo(() => {
@@ -229,10 +391,6 @@ function App() {
   const editorialIssues: EditorialIssue[] = useMemo(() => {
     return auditEditorialText(body, isMdx);
   }, [body, isMdx]);
-
-  const wordCount = useMemo(() => {
-    return body.trim() ? body.trim().split(/\s+/).length : 0;
-  }, [body]);
 
   async function refreshRepository(path: string) {
     try {
@@ -809,6 +967,7 @@ function App() {
                 isOpen={metadataOpen}
                 dropTarget={dropTarget}
                 validation={validation}
+                allRepoTags={allRepoTags}
                 onToggle={() => setMetadataOpen(!metadataOpen)}
                 onFieldChange={setField}
                 onChooseImage={chooseImage}
@@ -835,7 +994,7 @@ function App() {
                     <button className="tool-button" onClick={() => setSourceMode(!sourceMode)}>
                       {sourceMode ? 'Rich editor' : 'Raw source'}
                     </button>
-                    <span className="word-count">{wordCount} words</span>
+                    <span className="word-count">{wordsCount} words</span>
                   </div>
                 </div>
 
@@ -863,11 +1022,15 @@ function App() {
                     onAuxClick={e => {
                       if (e.button === 1) e.preventDefault();
                     }}
+                    onKeyUp={e => updateCursorPosition(e.currentTarget)}
+                    onClick={e => updateCursorPosition(e.currentTarget)}
+                    onSelect={e => updateCursorPosition(e.currentTarget)}
                     onChange={e => {
                       setSource(e.target.value);
                       try {
                         setMetadata(parseSiteDocument(e.target.value).metadata);
                       } catch {}
+                      updateCursorPosition(e.currentTarget);
                     }}
                     aria-label="Markdown source"
                   />
@@ -884,7 +1047,13 @@ function App() {
                     onAuxClick={e => {
                       if (e.button === 1) e.preventDefault();
                     }}
-                    onChange={e => setSource(replaceMarkdownBody(source, e.target.value))}
+                    onKeyUp={e => updateCursorPosition(e.currentTarget)}
+                    onClick={e => updateCursorPosition(e.currentTarget)}
+                    onSelect={e => updateCursorPosition(e.currentTarget)}
+                    onChange={e => {
+                      setSource(replaceMarkdownBody(source, e.target.value));
+                      updateCursorPosition(e.currentTarget);
+                    }}
                     aria-label="Markdown content"
                     placeholder="Write your article in Markdown…"
                   />
@@ -892,7 +1061,7 @@ function App() {
 
                 <EditorialAuditPanel
                   issues={editorialIssues}
-                  wordCount={wordCount}
+                  wordCount={wordsCount}
                   onFixEmDashes={handleFixEmDashes}
                 />
 
@@ -958,6 +1127,30 @@ function App() {
             />
           </>
         )}
+
+        {outlineOpen && (
+          <DocumentOutlineDrawer
+            open={outlineOpen}
+            headings={headings}
+            onClose={() => setOutlineOpen(false)}
+            onSelectHeading={item => {
+              if (bodyEditor.current) {
+                const lines = body.split('\n');
+                let charIdx = 0;
+                for (let i = 0; i < item.line && i < lines.length; i++) {
+                  charIdx += lines[i].length + 1;
+                }
+                bodyEditor.current.focus();
+                bodyEditor.current.setSelectionRange(charIdx, charIdx);
+                bodyEditor.current.scrollTop = Math.max(0, item.line * 24 - 40);
+                updateCursorPosition(bodyEditor.current);
+              } else if (sourceEditor.current) {
+                sourceEditor.current.focus();
+                updateCursorPosition(sourceEditor.current);
+              }
+            }}
+          />
+        )}
       </div>
     </>
   ) : (
@@ -988,6 +1181,11 @@ function App() {
         schemaIssuesCount={schemaIssues.length}
         native={native}
         liveSiteUrl={LIVE_SITE_URL}
+        theme={theme}
+        outlineOpen={outlineOpen}
+        onToggleTheme={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+        onToggleOutline={() => setOutlineOpen(o => !o)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
         onSelectRecent={refreshRepository}
         onChooseRepository={chooseRepository}
         onOpenSidebar={() => setSidebar(true)}
@@ -1052,8 +1250,27 @@ function App() {
               </span>
             </>
           )}
+          {selected && (
+            <>
+              <span className="status-divider" />
+              <span title="Word count and estimated reading time">
+                {wordsCount} words · ~{readTimeMin} min read
+              </span>
+              <span className="status-divider" />
+              <span title="Cursor position">
+                Ln {cursorPos.line}, Col {cursorPos.col}
+              </span>
+            </>
+          )}
         </div>
         <div className="status-actions">
+          <button
+            onClick={() => setWordWrap(!wordWrap)}
+            title="Toggle word wrap (Ctrl+Shift+W)"
+            className={wordWrap ? 'status-btn-active' : ''}
+          >
+            Wrap: {wordWrap ? 'On' : 'Off'}
+          </button>
           <button onClick={server} disabled={!native || !repository || busy}>
             {output.includes('4321') ? <Square size={13} /> : <Play size={13} />}{' '}
             {output.includes('4321') ? 'Stop preview' : 'Astro preview'}
@@ -1066,6 +1283,11 @@ function App() {
           </button>
         </div>
       </footer>
+
+      <KeyboardShortcutsDialog
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
 
       {(notice || output) && (
         <div className="notice-panel">

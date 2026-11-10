@@ -1,5 +1,5 @@
-import React from 'react';
-import { ChevronDown, AlertCircle, Upload } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { ChevronDown, AlertCircle, Upload, X, Tag } from 'lucide-react';
 import { SiteMetadata, PROJECT_STATUSES, PROJECT_ART, PROJECT_VISUALS, SITE_ACCENT_PRESETS } from '@/lib/site-adapter';
 import { Entry } from '../sidebar/ContentSidebar';
 
@@ -9,6 +9,7 @@ interface MetadataEditorProps {
   isOpen: boolean;
   dropTarget: 'content' | 'visual' | null;
   validation: string[];
+  allRepoTags?: string[];
   onToggle: () => void;
   onFieldChange: (key: string, value: unknown) => void;
   onChooseImage: (target: 'content' | 'visual') => void;
@@ -20,10 +21,39 @@ export const MetadataEditor: React.FC<MetadataEditorProps> = ({
   isOpen,
   dropTarget,
   validation,
+  allRepoTags = [],
   onToggle,
   onFieldChange,
   onChooseImage,
 }) => {
+  const [tagInput, setTagInput] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+
+  const currentTags: string[] = Array.isArray(metadata.tags)
+    ? (metadata.tags as string[])
+    : typeof metadata.tags === 'string'
+    ? (metadata.tags as string).split(',').map(t => t.trim()).filter(Boolean)
+    : [];
+
+  const handleAddTag = (rawTag: string) => {
+    const trimmed = rawTag.trim();
+    if (!trimmed) return;
+    if (!currentTags.includes(trimmed)) {
+      onFieldChange('tags', [...currentTags, trimmed]);
+    }
+    setTagInput('');
+    setShowSuggestions(false);
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    onFieldChange('tags', currentTags.filter(t => t !== tagToRemove));
+  };
+
+  const filteredSuggestions = allRepoTags.filter(
+    t => t.toLowerCase().includes(tagInput.toLowerCase().trim()) && !currentTags.includes(t)
+  );
+
   const dateValue = (date: unknown) => {
     if (date instanceof Date) return date.toISOString().slice(0, 10);
     if (typeof date === 'string') return date.slice(0, 10);
@@ -123,22 +153,66 @@ export const MetadataEditor: React.FC<MetadataEditorProps> = ({
             </label>
           </div>
 
-          <label className="field">
-            <span>Tags <small>comma separated</small></span>
-            <input
-              value={Array.isArray(metadata.tags) ? metadata.tags.join(', ') : ''}
-              onChange={e =>
-                onFieldChange(
-                  'tags',
-                  e.target.value
-                    .split(',')
-                    .map(t => t.trim())
-                    .filter(Boolean)
-                )
-              }
-              placeholder="Linux, Systems, Aerodynamics"
-            />
-          </label>
+          <div className="field">
+            <span>Tags <small>press Enter or comma to add</small></span>
+            <div className="tag-chips-wrapper" onClick={() => tagInputRef.current?.focus()}>
+              {currentTags.map(tag => (
+                <span key={tag} className="tag-chip">
+                  <Tag size={10} className="tag-chip-icon" />
+                  <span className="tag-chip-label">{tag}</span>
+                  <button
+                    type="button"
+                    className="tag-chip-remove"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleRemoveTag(tag);
+                    }}
+                    aria-label={`Remove tag ${tag}`}
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+              <input
+                ref={tagInputRef}
+                className="tag-chips-input"
+                value={tagInput}
+                onChange={e => {
+                  setTagInput(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    handleAddTag(tagInput);
+                  } else if (e.key === 'Backspace' && !tagInput && currentTags.length > 0) {
+                    handleRemoveTag(currentTags[currentTags.length - 1]);
+                  }
+                }}
+                placeholder={currentTags.length === 0 ? "Add tags (e.g. Aerodynamics, Linux)..." : "Add tag..."}
+              />
+            </div>
+            {showSuggestions && tagInput.trim() && filteredSuggestions.length > 0 && (
+              <div className="tag-autocomplete-dropdown">
+                {filteredSuggestions.slice(0, 8).map(suggestion => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className="tag-autocomplete-item"
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      handleAddTag(suggestion);
+                    }}
+                  >
+                    <Tag size={10} />
+                    <span>{suggestion}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {selected.kind === 'Projects' && (
             <>

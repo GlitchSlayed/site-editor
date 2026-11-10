@@ -94,17 +94,21 @@ export function auditEditorialText(text: string, isMdx = false): EditorialIssue[
       'DataTable',
       'NotebookCell',
       'Tooltip',
+      'EngineeringNote',
+      'EquationBlock',
+      'Measurement',
     ];
 
-    const hasMdxComponent = knownMdxComponents.some(comp => new RegExp(`<${comp}\\b`).test(text));
+    const usedComponents = knownMdxComponents.filter(comp => new RegExp(`<${comp}\\b`).test(text));
     const hasMdxImport = /import\s+.*?\s+from\s+['"](@components\/mdx|.*?components\/mdx)['"]/.test(text);
 
-    if (hasMdxComponent && !hasMdxImport) {
+    if (usedComponents.length > 0 && !hasMdxImport) {
       issues.push({
         id: 'mdx-import-missing',
         type: 'mdx-import',
         severity: 'warning',
-        message: 'MDX components are used but missing import from "@components/mdx" or "../../components/mdx".',
+        message: `MDX components used (${usedComponents.join(', ')}) but missing import from "@components/mdx".`,
+        replacement: `import { ${usedComponents.join(', ')} } from '@components/mdx';\n\n`,
       });
     }
   }
