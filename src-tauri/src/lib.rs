@@ -478,17 +478,189 @@ fn project_command(path: String, operation: String) -> Result<CommandResult, Str
 
     run_host_program(&root, prog, &args)
 }
-#[tauri::command] fn git_info(path:String)->Result<GitInfo,String>{
- let root=repo(&path)?;let b=run_host_program(&root,"git",&["branch","--show-current"])?;if b.code!=0{return Err(b.output)} let branch=b.output.trim().to_string();let u=run_host_program(&root,"git",&["rev-parse","--abbrev-ref","--symbolic-full-name","@{upstream}"])?;let upstream=if u.code==0{u.output.trim().to_string()}else{String::new()}; let (ahead,behind)=if upstream.is_empty(){(0,0)}else{let r=run_host_program(&root,"git",&["rev-list","--left-right","--count",&format!("HEAD...{}",upstream)])?;parse_counts(&r.output)};let s=run_host_program(&root,"git",&["status","--short"])?;let changed=s.output.lines().map(|l|l.get(3..).unwrap_or(l).to_string()).collect();let d=run_host_program(&root,"git",&["diff","HEAD","--"])?;Ok(GitInfo{branch,upstream,ahead,behind,changed,diff:d.output})
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct GitStatusEntry {
+    pub index_status: char,
+    pub worktree_status: char,
+    pub path: String,
+    pub orig_path: Option<String>,
 }
-#[tauri::command] fn publish(path:String,message:String)->Result<CommandResult,String>{
- let root=repo(&path)?;if message.trim().is_empty(){return Err("Enter a commit message.".into())} let upstream=run_host_program(&root,"git",&["rev-parse","--abbrev-ref","--symbolic-full-name","@{upstream}"])?;if upstream.code!=0{return Err("This branch has no configured upstream. Configure it in Git before publishing.".into())}let upstream=upstream.output.trim().to_string();let fetch=run_host_program(&root,"git",&["fetch","--prune"])?;if fetch.code!=0{return Ok(fetch)} let counts=run_host_program(&root,"git",&["rev-list","--left-right","--count",&format!("HEAD...{}",upstream)])?;let (_,behind)=parse_counts(&counts.output);if behind>0{return Err(format!("Branch is {behind} commit(s) behind {upstream}. Integrate remote changes before publishing."))}
- let staged=run_host_program(&root,"git",&["diff","--cached","--name-only","-z"])?;let staged_paths:Vec<_>=staged.output.split('\0').filter(|p|!p.is_empty()).collect();if let Some(unrelated)=staged_paths.iter().find(|p|!publishable_path(p)){return Err(format!("Unrelated files are already staged ({unrelated}). Commit or unstage those changes before publishing."))}
- let status=run_host_program(&root,"git",&["status","--porcelain=v1","-z","--untracked-files=all"])?;let mut paths=Vec::<String>::new();for record in status.output.split('\0').filter(|r|!r.is_empty()){let rel=record.get(3..).unwrap_or("");if publishable_path(rel){paths.push(rel.to_string())}}
- if paths.is_empty(){return Err("No changed writing, project, or public asset files are available to publish.".into())}
- let mut cmd=command(&root,"git")?;cmd.arg("add").arg("--").args(&paths);let add=cmd.output().map_err(fail)?;if !add.status.success(){return Err(String::from_utf8_lossy(&add.stderr).to_string())}
- let diff=run_host_program(&root,"git",&["diff","--cached","--stat"])?;if diff.output.trim().is_empty(){return Err("There are no staged changes to commit.".into())}
- let commit=command(&root,"git")?.arg("commit").arg("-m").arg(&message).output().map_err(fail)?;if !commit.status.success(){return Err(String::from_utf8_lossy(&commit.stderr).to_string())}let push=run_host_program(&root,"git",&["push"])?;if push.code!=0{return Ok(push)}Ok(CommandResult{code:0,output:format!("{}\n{}\n{}",diff.output,String::from_utf8_lossy(&commit.stdout),push.output)})
+
+pub fn parse_porcelain_z(output: &str) -> Vec<GitStatusEntry> {
+    let mut entries = Vec::new();
+    let mut iter = output.split('\0');
+
+    while let Some(record) = iter.next() {
+        if record.is_empty() || record.len() < 3 {
+            continue;
+        }
+
+        let mut chars = record.chars();
+        let index_status = chars.next().unwrap_or(' ');
+        let worktree_status = chars.next().unwrap_or(' ');
+        let path = record[3..].to_string();
+
+        let is_rename_or_copy = index_status == 'R' || index_status == 'C' || worktree_status == 'R' || worktree_status == 'C';
+        if is_rename_or_copy {
+            if let Some(dest_path) = iter.next() {
+                if !dest_path.is_empty() {
+                    entries.push(GitStatusEntry {
+                        index_status,
+                        worktree_status,
+                        path: dest_path.to_string(),
+                        orig_path: Some(path),
+                    });
+                    continue;
+                }
+            }
+        }
+
+        entries.push(GitStatusEntry {
+            index_status,
+            worktree_status,
+            path,
+            orig_path: None,
+        });
+    }
+
+    entries
+}
+
+#[tauri::command]
+fn git_diff_file(path: String, file: Option<String>) -> Result<String, String> {
+    let root = repo(&path)?;
+    let args: Vec<String> = if let Some(ref rel) = file {
+        let p = safe_file(&root, rel)?;
+        let safe_rel = p.strip_prefix(&root).map_err(fail)?.to_string_lossy().replace('\\', "/");
+        vec!["diff".into(), "HEAD".into(), "--".into(), safe_rel]
+    } else {
+        vec!["diff".into(), "HEAD".into(), "--".into()]
+    };
+
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let result = run_host_program(&root, "git", &arg_refs)?;
+
+    const MAX_DIFF_BYTES: usize = 50_000;
+    if result.output.len() > MAX_DIFF_BYTES {
+        let truncated = &result.output[..MAX_DIFF_BYTES];
+        Ok(format!("{truncated}\n\n[Diff truncated: diff exceeds 50 KB limit]"))
+    } else {
+        Ok(result.output)
+    }
+}
+
+#[tauri::command]
+fn git_info(path: String) -> Result<GitInfo, String> {
+    let root = repo(&path)?;
+    let b = run_host_program(&root, "git", &["branch", "--show-current"])?;
+    if b.code != 0 {
+        return Err(b.output);
+    }
+    let branch = b.output.trim().to_string();
+
+    let u = run_host_program(&root, "git", &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])?;
+    let upstream = if u.code == 0 {
+        u.output.trim().to_string()
+    } else {
+        String::new()
+    };
+
+    let (ahead, behind) = if upstream.is_empty() {
+        (0, 0)
+    } else {
+        let r = run_host_program(&root, "git", &["rev-list", "--left-right", "--count", &format!("HEAD...{}", upstream)])?;
+        parse_counts(&r.output)
+    };
+
+    let s = run_host_program(&root, "git", &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+    let entries = parse_porcelain_z(&s.output);
+    let changed = entries.into_iter().map(|e| e.path).collect();
+
+    Ok(GitInfo {
+        branch,
+        upstream,
+        ahead,
+        behind,
+        changed,
+        diff: String::new(),
+    })
+}
+
+#[tauri::command]
+fn publish(path: String, message: String) -> Result<CommandResult, String> {
+    let root = repo(&path)?;
+    if message.trim().is_empty() {
+        return Err("Enter a commit message.".into());
+    }
+
+    let upstream = run_host_program(&root, "git", &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])?;
+    if upstream.code != 0 {
+        return Err("This branch has no configured upstream. Configure it in Git before publishing.".into());
+    }
+    let upstream = upstream.output.trim().to_string();
+
+    let fetch = run_host_program(&root, "git", &["fetch", "--prune"])?;
+    if fetch.code != 0 {
+        return Ok(fetch);
+    }
+
+    let counts = run_host_program(&root, "git", &["rev-list", "--left-right", "--count", &format!("HEAD...{}", upstream)])?;
+    let (_, behind) = parse_counts(&counts.output);
+    if behind > 0 {
+        return Err(format!("Branch is {behind} commit(s) behind {upstream}. Integrate remote changes before publishing."));
+    }
+
+    let staged = run_host_program(&root, "git", &["diff", "--cached", "--name-only", "-z"])?;
+    let staged_paths: Vec<_> = staged.output.split('\0').filter(|p| !p.is_empty()).collect();
+    if let Some(unrelated) = staged_paths.iter().find(|p| !publishable_path(p)) {
+        return Err(format!("Unrelated files are already staged ({unrelated}). Commit or unstage those changes before publishing."));
+    }
+
+    let status = run_host_program(&root, "git", &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+    let entries = parse_porcelain_z(&status.output);
+    let mut paths = Vec::<String>::new();
+
+    for entry in entries {
+        if publishable_path(&entry.path) {
+            if let Some(orig) = entry.orig_path {
+                if publishable_path(&orig) {
+                    paths.push(orig);
+                }
+            }
+            paths.push(entry.path);
+        }
+    }
+
+    if paths.is_empty() {
+        return Err("No changed writing, project, or public asset files are available to publish.".into());
+    }
+
+    let mut cmd = command(&root, "git")?;
+    cmd.arg("add").arg("--").args(&paths);
+    let add = cmd.output().map_err(fail)?;
+    if !add.status.success() {
+        return Err(String::from_utf8_lossy(&add.stderr).to_string());
+    }
+
+    let diff = run_host_program(&root, "git", &["diff", "--cached", "--stat"])?;
+    if diff.output.trim().is_empty() {
+        return Err("There are no staged changes to commit.".into());
+    }
+
+    let commit = command(&root, "git")?.arg("commit").arg("-m").arg(&message).output().map_err(fail)?;
+    if !commit.status.success() {
+        return Err(String::from_utf8_lossy(&commit.stderr).to_string());
+    }
+
+    let push = run_host_program(&root, "git", &["push"])?;
+    if push.code != 0 {
+        return Ok(push);
+    }
+
+    Ok(CommandResult {
+        code: 0,
+        output: format!("{}\n{}\n{}", diff.output, String::from_utf8_lossy(&commit.stdout), push.output),
+    })
 }
 #[tauri::command]
 fn run_dev_server(path: String, state: State<Server>) -> Result<String, String> {
@@ -645,7 +817,7 @@ fn validate_repo(path: String) -> Result<Vec<String>, String> {
     let extracted = extract_schema_from_content_config(&schema_text)?;
     Ok(validate_repo_schema(&extracted))
 }
-#[cfg_attr(mobile, tauri::mobile_entry_point)] pub fn run(){tauri::Builder::default().manage(Server(Mutex::new(None))).plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init()).invoke_handler(tauri::generate_handler![list_content,create_article,rename_article,delete_article,duplicate_article,read_article,save_article,import_site_image,read_site_image,project_command,environment,git_info,publish,run_dev_server,stop_dev_server,validate_repo]).run(tauri::generate_context!()).expect("error while running Tauri application");}
+#[cfg_attr(mobile, tauri::mobile_entry_point)] pub fn run(){tauri::Builder::default().manage(Server(Mutex::new(None))).plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init()).invoke_handler(tauri::generate_handler![list_content,create_article,rename_article,delete_article,duplicate_article,read_article,save_article,import_site_image,read_site_image,project_command,environment,git_info,git_diff_file,publish,run_dev_server,stop_dev_server,validate_repo]).run(tauri::generate_context!()).expect("error while running Tauri application");}
 
 #[cfg(test)] mod tests {
  use super::*;
@@ -764,5 +936,25 @@ fn validate_repo(path: String) -> Result<Vec<String>, String> {
   let (dup_title, dup_draft) = parse_frontmatter_metadata(&duplicated);
   assert_eq!(dup_title, Some("Added Frontmatter".to_string()));
   assert_eq!(dup_draft, true);
+ }
+ #[test] fn porcelain_z_parsing_handles_standard_records_and_renames() {
+  let raw = " M src/content/writing/article.md\0?? src/content/projects/new.md\0R  src/content/writing/old.md\0src/content/writing/renamed.md\0";
+  let entries = parse_porcelain_z(raw);
+  assert_eq!(entries.len(), 3);
+
+  assert_eq!(entries[0].index_status, ' ');
+  assert_eq!(entries[0].worktree_status, 'M');
+  assert_eq!(entries[0].path, "src/content/writing/article.md");
+  assert_eq!(entries[0].orig_path, None);
+
+  assert_eq!(entries[1].index_status, '?');
+  assert_eq!(entries[1].worktree_status, '?');
+  assert_eq!(entries[1].path, "src/content/projects/new.md");
+  assert_eq!(entries[1].orig_path, None);
+
+  assert_eq!(entries[2].index_status, 'R');
+  assert_eq!(entries[2].worktree_status, ' ');
+  assert_eq!(entries[2].path, "src/content/writing/renamed.md");
+  assert_eq!(entries[2].orig_path, Some("src/content/writing/old.md".to_string()));
  }
 }

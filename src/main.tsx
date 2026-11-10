@@ -94,6 +94,8 @@ function App() {
   const [schemaIssues, setSchemaIssues] = useState<string[]>([]);
   const [commitMessage, setCommitMessage] = useState('');
   const [publishDialog, setPublishDialog] = useState(false);
+  const [diffText, setDiffText] = useState('');
+  const [diffLoading, setDiffLoading] = useState(false);
   const [newDialog, setNewDialog] = useState(false);
   const [newKind, setNewKind] = useState<'writing' | 'projects'>('writing');
   const [newExtension, setNewExtension] = useState<'md' | 'mdx'>('md');
@@ -893,6 +895,19 @@ function App() {
     }
   }
 
+  async function loadWorkingDiff() {
+    if (!native || !repository) return;
+    setDiffLoading(true);
+    try {
+      const diff = await invoke<string>('git_diff_file', { path: repository, file: null });
+      setDiffText(diff);
+    } catch (e) {
+      setDiffText(String(e));
+    } finally {
+      setDiffLoading(false);
+    }
+  }
+
   const content = selected ? (
     <>
       <div className="docbar">
@@ -1479,11 +1494,16 @@ function App() {
               <span>Commit message</span>
               <input value={commitMessage} onChange={e => setCommitMessage(e.target.value)} />
             </label>
-            <details className="diff-details">
+            <details
+              className="diff-details"
+              onToggle={e => {
+                if (e.currentTarget.open && !diffText) void loadWorkingDiff();
+              }}
+            >
               <summary>
                 Review working diff <ChevronDown size={14} />
               </summary>
-              <pre>{git?.diff || 'No unstaged text diff.'}</pre>
+              <pre>{diffLoading ? 'Loading diff…' : diffText || 'No unstaged text diff.'}</pre>
             </details>
             <div className="modal-actions">
               <button className="button button-outline" onClick={() => setPublishDialog(false)}>
