@@ -1,960 +1,258 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::{fs, io::Write, net::{SocketAddr, TcpStream}, path::{Path, PathBuf}, process::{Child, Command, Stdio}, sync::Mutex, thread, time::Duration};
-use tauri::State;
+pub mod content;
+pub mod devserver;
+pub mod env;
+pub mod git;
+pub mod images;
+pub mod jobs;
+pub mod repo;
 
-struct Server(Mutex<Option<Child>>);
-impl Drop for Server{fn drop(&mut self){if let Ok(slot)=self.0.get_mut(){if let Some(mut child)=slot.take(){let _=child.kill();let _=child.wait();}}}}
-#[derive(Deserialize)] struct PortalDocument { id: String, path: String, origin: String }
-#[derive(Serialize)] struct Entry { path: String, kind: String, title: String, draft: bool, modified: String }
-#[derive(Serialize)] struct FileData { text: String, hash: String }
-#[derive(Serialize)] struct CommandResult { code: i32, output: String }
-#[derive(Serialize)] struct GitInfo { branch: String, upstream: String, ahead: usize, behind: usize, changed: Vec<String>, diff: String }
-#[derive(Serialize)] struct Environment { package_manager: String, package_manager_version: String, node_version: String, npm_version: String, required_node: String, dependencies_installed: bool, node_compatible: bool, messages: Vec<String> }
-fn fail<T: std::fmt::Display>(e:T)->String { e.to_string() }
-fn repo(path:&str)->Result<PathBuf,String> {
- let p=Path::new(path).canonicalize().map_err(fail)?;
- if !p.is_dir() || !p.join(".git").exists() || !p.join("package.json").exists() || !p.join("astro.config.mjs").exists() { return Err("Choose a Git checkout containing package.json and astro.config.mjs.".into()) }
- Ok(p)
-}
-fn validate_slug(slug: &str) -> Result<(), String> {
- if slug.is_empty() || !slug.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') || slug.starts_with('-') || slug.ends_with('-') || slug.contains("--") {
-  return Err("Use a lowercase URL-safe filename with letters, numbers, and single hyphens.".into());
- }
- Ok(())
-}
-fn safe_file(root:&Path, rel:&str)->Result<PathBuf,String>{
- let relp=Path::new(rel); if relp.is_absolute() || relp.components().any(|c| !matches!(c,std::path::Component::Normal(_))) { return Err("Invalid repository path.".into()) }
- let p=root.join(relp); let real=p.canonicalize().map_err(fail)?; if !real.starts_with(root) || !real.is_file(){return Err("The selected file is outside the repository or is not a regular file.".into())} Ok(real)
-}
-#[tauri::command] fn create_article(path:String,kind:String,title:String,slug:String,extension:String,text:String)->Result<Entry,String>{
- let root=repo(&path)?;
- let (label,relative)=match kind.as_str(){"writing"=>("Writing","src/content/writing"),"projects"=>("Projects","src/content/projects"),_=>return Err("Choose Writing or Projects for the new document.".into())};
- if !matches!(extension.as_str(),"md"|"mdx"){return Err("Choose Markdown (.md) or MDX (.mdx) for the new document.".into())}
- validate_slug(&slug)?;
- let directory=root.join(relative).canonicalize().map_err(fail)?;
- if !directory.starts_with(&root)||!directory.is_dir(){return Err("The content folder is outside the selected repository.".into())}
- let target=directory.join(format!("{slug}.{extension}"));
- let mut file=fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|e|if e.kind()==std::io::ErrorKind::AlreadyExists{"A file with that name already exists.".to_string()}else{fail(e)})?;
- if let Err(error)=file.write_all(text.as_bytes()).and_then(|_|file.sync_all()){let _=fs::remove_file(&target);return Err(fail(error))}
- Ok(Entry{path:format!("{relative}/{slug}.{extension}"),kind:label.into(),title,draft:true,modified:String::new()})
-}
-pub fn split_frontmatter(text: &str) -> Option<(&str, &str, &str)> {
-    let (first_fence, rest) = if let Some(stripped) = text.strip_prefix("---\r\n") {
-        ("---\r\n", stripped)
-    } else if let Some(stripped) = text.strip_prefix("---\n") {
-        ("---\n", stripped)
-    } else {
-        return None;
-    };
+use std::sync::{Arc, Mutex};
+use devserver::{DevServerManager, DevServerState};
+use jobs::{JobManager, JobsState};
 
-    let patterns = ["\r\n---\r\n", "\r\n---\n", "\n---\r\n", "\n---\n", "\r\n---", "\n---"];
-    for pat in patterns {
-        if let Some(pos) = rest.find(pat) {
-            let yaml = &rest[..pos];
-            let after_fence = &rest[pos + pat.len()..];
-            let ending = if first_fence.contains("\r\n") { "\r\n" } else { "\n" };
-            return Some((yaml, after_fence, ending));
-        }
-    }
-    None
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(JobsState(Arc::new(JobManager::default())))
+        .manage(DevServerState(Arc::new(Mutex::new(DevServerManager::default()))))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![
+            content::list_content,
+            content::create_article,
+            content::rename_article,
+            content::delete_article,
+            content::duplicate_article,
+            content::read_article,
+            content::save_article,
+            images::import_site_image,
+            images::read_site_image,
+            jobs::project_command,
+            jobs::cancel_project_command,
+            env::environment,
+            env::validate_repo,
+            git::git_info,
+            git::git_diff_file,
+            git::publish,
+            devserver::run_dev_server,
+            devserver::stop_dev_server,
+            devserver::dev_server_status,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Tauri application");
 }
 
-pub fn parse_frontmatter_metadata(text: &str) -> (Option<String>, bool) {
-    let Some((yaml, _, _)) = split_frontmatter(text) else {
-        return (None, false);
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
 
-    if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(yaml) {
-        if let Some(mapping) = value.as_mapping() {
-            let title = mapping
-                .get(&serde_yaml::Value::String("title".to_string()))
-                .and_then(|v| {
-                    if let Some(s) = v.as_str() {
-                        Some(s.trim().to_string())
-                    } else if let Some(n) = v.as_i64() {
-                        Some(n.to_string())
-                    } else {
-                        None
-                    }
-                });
-
-            let draft = mapping
-                .get(&serde_yaml::Value::String("draft".to_string()))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-
-            return (title, draft);
-        }
+    #[test]
+    fn git_ahead_behind_counts_are_parsed_in_order() {
+        assert_eq!(git::parse_counts("3\t2\n"), (3, 2));
+        assert_eq!(git::parse_counts("bad 4"), (0, 4));
+        assert_eq!(git::parse_counts(""), (0, 0));
     }
 
-    let mut fallback_title = None;
-    let mut fallback_draft = false;
-    for line in yaml.lines() {
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            if let Some(rest) = line.strip_prefix("title:") {
-                let t = rest.trim().trim_matches(['"', '\'']).to_string();
-                if !t.is_empty() {
-                    fallback_title = Some(t);
-                }
-            } else if let Some(rest) = line.strip_prefix("draft:") {
-                if rest.trim() == "true" {
-                    fallback_draft = true;
-                }
-            }
-        }
-    }
-    (fallback_title, fallback_draft)
-}
-
-pub fn duplicate_article_text(original: &str, new_title: &str) -> Result<String, String> {
-    let is_crlf = original.contains("\r\n");
-    let line_ending = if is_crlf { "\r\n" } else { "\n" };
-    let has_trailing_newline = original.ends_with('\n');
-
-    let Some((yaml_str, body, _)) = split_frontmatter(original) else {
-        let mut out = format!("---{line_ending}title: \"{}\"{line_ending}draft: true{line_ending}---{line_ending}", new_title.replace('"', "\\\""));
-        if !original.is_empty() {
-            out.push_str(original);
-            if has_trailing_newline && !out.ends_with('\n') {
-                out.push_str(line_ending);
-            }
-        }
-        return Ok(out);
-    };
-
-    let mut updated_lines = Vec::new();
-    let mut title_replaced = false;
-    let mut draft_replaced = false;
-
-    for line in yaml_str.split(line_ending) {
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            if line.starts_with("title:") {
-                updated_lines.push(format!("title: \"{}\"", new_title.replace('"', "\\\"")));
-                title_replaced = true;
-                continue;
-            } else if line.starts_with("draft:") {
-                updated_lines.push("draft: true".to_string());
-                draft_replaced = true;
-                continue;
-            }
-        }
-        updated_lines.push(line.to_string());
+    #[test]
+    fn publish_allowlist_excludes_site_code_and_non_asset_public_files() {
+        assert!(repo::publishable_path("src/content/writing/story.mdx"));
+        assert!(repo::publishable_path("public/images/rocket.webp"));
+        assert!(!repo::publishable_path("src/pages/index.astro"));
+        assert!(!repo::publishable_path("public/.env"));
+        assert!(!repo::publishable_path("public/scripts/app.js"));
     }
 
-    if !title_replaced {
-        updated_lines.insert(0, format!("title: \"{}\"", new_title.replace('"', "\\\"")));
-    }
-    if !draft_replaced {
-        updated_lines.push("draft: true".to_string());
-    }
-
-    let updated_yaml = updated_lines.join(line_ending);
-    let mut result = format!("---{line_ending}{updated_yaml}{line_ending}---{line_ending}{body}");
-    if has_trailing_newline && !result.ends_with('\n') {
-        result.push_str(line_ending);
-    } else if !has_trailing_newline && result.ends_with('\n') {
-        while result.ends_with('\n') || result.ends_with('\r') {
-            result.pop();
-        }
-    }
-    Ok(result)
-}
-
-#[tauri::command] fn rename_article(path:String,file:String,new_slug:String)->Result<Entry,String>{
- let root=repo(&path)?;
- let old_path=safe_file(&root,&file)?;
- validate_slug(&new_slug)?;
- let extension=old_path.extension().and_then(|e|e.to_str()).ok_or("File has no extension")?;
- let parent=old_path.parent().ok_or("Invalid file parent")?;
- let new_file_name=format!("{new_slug}.{extension}");
- let new_path=parent.join(&new_file_name);
- if new_path.exists(){return Err("A file with that name already exists.".into())}
- fs::rename(&old_path,&new_path).map_err(fail)?;
- let rel=new_path.strip_prefix(&root).map_err(fail)?.to_string_lossy().replace('\\',"/");
- let kind=if rel.starts_with("src/content/writing/"){"Writing"}else{"Projects"};
- let text=fs::read_to_string(&new_path).unwrap_or_default();
- let (parsed_title, draft) = parse_frontmatter_metadata(&text);
- let title = parsed_title.unwrap_or_else(|| new_slug.clone());
- Ok(Entry{path:rel,kind:kind.into(),title,draft,modified:String::new()})
-}
-#[tauri::command] fn delete_article(path:String,file:String)->Result<(),String>{
- let root=repo(&path)?;
- let target=safe_file(&root,&file)?;
- if !file.starts_with("src/content/writing/") && !file.starts_with("src/content/projects/"){
-  return Err("Only content documents can be deleted.".into());
- }
- fs::remove_file(&target).map_err(fail)?;
- Ok(())
-}
-#[tauri::command] fn duplicate_article(path:String,file:String,new_slug:String,new_title:String)->Result<Entry,String>{
- let root=repo(&path)?;
- let source=safe_file(&root,&file)?;
- validate_slug(&new_slug)?;
- let extension=source.extension().and_then(|e|e.to_str()).ok_or("File has no extension")?;
- let parent=source.parent().ok_or("Invalid source parent")?;
- let target=parent.join(format!("{new_slug}.{extension}"));
- if target.exists(){return Err("A file with that name already exists.".into())}
- let original_text=fs::read_to_string(&source).map_err(fail)?;
- let duplicated_text=duplicate_article_text(&original_text, &new_title)?;
- let mut out=fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(fail)?;
- out.write_all(duplicated_text.as_bytes()).map_err(fail)?;
- out.sync_all().map_err(fail)?;
- let rel=target.strip_prefix(&root).map_err(fail)?.to_string_lossy().replace('\\',"/");
- let kind=if rel.starts_with("src/content/writing/"){"Writing"}else{"Projects"};
- Ok(Entry{path:rel,kind:kind.into(),title:new_title,draft:true,modified:String::new()})
-}
-fn hash(bytes:&[u8])->String { format!("{:x}",Sha256::digest(bytes)) }
-fn parse_counts(value:&str)->(usize,usize){let values:Vec<_>=value.split_whitespace().collect();(values.first().and_then(|x|x.parse().ok()).unwrap_or(0),values.get(1).and_then(|x|x.parse().ok()).unwrap_or(0))}
-fn publishable_path(rel:&str)->bool{
- let path=Path::new(rel);let ext=path.extension().and_then(|e|e.to_str()).unwrap_or("").to_ascii_lowercase();
- if (rel.starts_with("src/content/writing/")||rel.starts_with("src/content/projects/")) && matches!(ext.as_str(),"md"|"mdx"){return true}
- rel.starts_with("public/") && matches!(ext.as_str(),"png"|"jpg"|"jpeg"|"webp"|"avif"|"gif"|"svg"|"mp4"|"pdf"|"woff"|"woff2")
-}
-fn after_document_id(path:&Path,id:&str)->Option<PathBuf>{
- let mut found=false;let mut suffix=PathBuf::new();for component in path.components(){if found{suffix.push(component.as_os_str())}else if component.as_os_str()==id{found=true}}if found{Some(suffix)}else{None}
-}
-fn host_repository(root:&Path)->Result<PathBuf,String>{
- if std::env::var_os("FLATPAK_ID").is_none(){return Ok(root.to_path_buf())}
- let output=Command::new("flatpak-spawn").args(["--host","--watch-bus","flatpak","documents","--json","--columns=all","com.glitchslayed.site-editor"]).output().map_err(fail)?;
- if !output.status.success(){return Err(String::from_utf8_lossy(&output.stderr).trim().to_string())}
- let documents:Vec<PortalDocument>=serde_json::from_slice(&output.stdout).map_err(fail)?;
- for document in documents{
-  let Some(document_relative)=after_document_id(Path::new(&document.path),&document.id) else{continue};
-  let Some(root_relative)=after_document_id(root,&document.id) else{continue};
-  let Ok(extra)=root_relative.strip_prefix(&document_relative) else{continue};
-  return Ok(Path::new(&document.origin).join(extra));
- }
- Err("The site folder’s document portal grant is missing. Reopen the repository with the folder picker, then save again.".into())
-}
-const ALLOWED_PROGRAMS: &[&str] = &["git", "node", "npm", "bun", "pnpm", "yarn"];
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum PackageManager {
-    Bun,
-    Pnpm,
-    Yarn,
-    Npm,
-}
-
-impl PackageManager {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            PackageManager::Bun => "bun",
-            PackageManager::Pnpm => "pnpm",
-            PackageManager::Yarn => "yarn",
-            PackageManager::Npm => "npm",
-        }
-    }
-}
-
-pub fn detect_package_manager(root: &Path) -> PackageManager {
-    if let Ok(data) = fs::read(root.join("package.json")) {
-        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
-            if let Some(pm_str) = val.get("packageManager").and_then(|v| v.as_str()) {
-                let trimmed = pm_str.trim().to_lowercase();
-                if trimmed.starts_with("bun") {
-                    return PackageManager::Bun;
-                } else if trimmed.starts_with("pnpm") {
-                    return PackageManager::Pnpm;
-                } else if trimmed.starts_with("yarn") {
-                    return PackageManager::Yarn;
-                } else if trimmed.starts_with("npm") {
-                    return PackageManager::Npm;
-                }
-            }
-        }
+    #[test]
+    fn repository_file_paths_cannot_escape_or_follow_outside_symlinks() {
+        let dir = std::env::temp_dir().join(format!("site-editor-path-test-{}", std::process::id()));
+        let outside = dir.with_extension("outside");
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&outside);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("entry.md"), "safe").unwrap();
+        fs::write(&outside, "outside").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, dir.join("escape.md")).unwrap();
+        assert!(repo::safe_file(&dir, "entry.md").is_ok());
+        assert!(repo::safe_file(&dir, "../outside").is_err());
+        #[cfg(unix)]
+        assert!(repo::safe_file(&dir, "escape.md").is_err());
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&outside);
     }
 
-    if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
-        PackageManager::Bun
-    } else if root.join("pnpm-lock.yaml").exists() {
-        PackageManager::Pnpm
-    } else if root.join("yarn.lock").exists() {
-        PackageManager::Yarn
-    } else if root.join("package-lock.json").exists() {
-        PackageManager::Npm
-    } else {
-        PackageManager::Npm
-    }
-}
-
-fn command(root:&Path, program:&str)->Result<Command,String>{
-    if !ALLOWED_PROGRAMS.contains(&program) {
-        return Err(format!("Program '{program}' is not in the allowed command list."));
-    }
-    if std::env::var_os("FLATPAK_ID").is_some(){let host_root=host_repository(root)?;let mut c=Command::new("flatpak-spawn");c.arg("--host").arg("--watch-bus").arg(format!("--directory={}",host_root.display())).arg(program);Ok(c)}
-    else{let mut c=Command::new(program);c.current_dir(root);Ok(c)}
-}
-fn run_host_program(root:&Path, program:&str, args:&[&str])->Result<CommandResult,String>{
-    if !ALLOWED_PROGRAMS.contains(&program) {
-        return Err(format!("Program '{program}' is not in the allowed command list."));
-    }
-    let o=command(root,program)?.args(args).output().map_err(fail)?;
-    Ok(CommandResult{code:o.status.code().unwrap_or(-1),output:String::from_utf8_lossy(&o.stdout).to_string()+&String::from_utf8_lossy(&o.stderr)})
-}
-fn run_host_version(root:&Path,program:&str)->Result<CommandResult,String>{
-    if !ALLOWED_PROGRAMS.contains(&program) {
-        return Err(format!("Program '{program}' is not in the allowed command list."));
-    }
-    let o=if std::env::var_os("FLATPAK_ID").is_some(){Command::new("flatpak-spawn").args(["--host","--watch-bus",program,"--version"]).output().map_err(fail)?}else{command(root,program)?.arg("--version").output().map_err(fail)?};
-    Ok(CommandResult{code:o.status.code().unwrap_or(-1),output:String::from_utf8_lossy(&o.stdout).to_string()+&String::from_utf8_lossy(&o.stderr)})
-}
-fn detected_version(root:&Path,program:&str)->(String,Option<String>){
- match run_host_version(root,program){Ok(result) if result.code==0=>(result.output.trim().to_string(),None),Ok(result)=>(String::new(),Some(if result.output.trim().is_empty(){format!("{program} exited with code {}.",result.code)}else{result.output.trim().to_string()})),Err(error)=>(String::new(),Some(error))}
-}
-#[tauri::command]
-fn list_content(path: String) -> Result<Vec<Entry>, String> {
-    let root = repo(&path)?;
-    let mut out = Vec::new();
-    for (kind, dir) in [("Writing", "src/content/writing"), ("Projects", "src/content/projects")] {
-        let d = root.join(dir);
-        if !d.exists() {
-            continue;
-        }
-        for item in fs::read_dir(d).map_err(fail)? {
-            let item = item.map_err(fail)?;
-            let p = item.path();
-            if !matches!(p.extension().and_then(|e| e.to_str()), Some("md" | "mdx")) {
-                continue;
-            }
-            let real = p.canonicalize().map_err(fail)?;
-            if !real.starts_with(&root) || !real.is_file() {
-                continue;
-            }
-            let text = fs::read_to_string(&real).map_err(fail)?;
-            let (parsed_title, draft) = parse_frontmatter_metadata(&text);
-            let title = parsed_title.unwrap_or_else(|| p.file_stem().unwrap().to_string_lossy().to_string());
-            let modified = fs::metadata(&real)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .map(|t| format!("{:?}", t))
-                .unwrap_or_default();
-            out.push(Entry {
-                path: real.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"),
-                kind: kind.into(),
-                title,
-                draft,
-                modified,
-            });
-        }
-    }
-    out.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase())));
-    Ok(out)
-}
-#[tauri::command] fn read_article(path:String,file:String)->Result<FileData,String>{let root=repo(&path)?;let p=safe_file(&root,&file)?;let bytes=fs::read(p).map_err(fail)?;let text=String::from_utf8(bytes.clone()).map_err(fail)?;Ok(FileData{text,hash:hash(&bytes)})}
-fn image_mime(path:&Path)->Result<&'static str,String>{match path.extension().and_then(|e|e.to_str()).unwrap_or("").to_ascii_lowercase().as_str(){"png"=>Ok("image/png"),"jpg"|"jpeg"=>Ok("image/jpeg"),"webp"=>Ok("image/webp"),"avif"=>Ok("image/avif"),"gif"=>Ok("image/gif"),"svg"=>Ok("image/svg+xml"),_=>Err("Choose a PNG, JPEG, WebP, AVIF, GIF, or SVG image.".into())}}
-#[tauri::command] fn import_site_image(path:String,article:String,source_path:String,usage:String)->Result<String,String>{
- let root=repo(&path)?;let article_path=safe_file(&root,&article)?;
- let family=if article.starts_with("src/content/writing/"){"posts"}else if article.starts_with("src/content/projects/"){"projects"}else{return Err("Images can only be added to a writing or project document.".into())};
- if usage!="content"&&usage!="visual"{return Err("Choose a supported image destination.".into())}if usage=="visual"&&family!="projects"{return Err("Project visual images can only be attached to a project.".into())}
- let source=Path::new(&source_path).canonicalize().map_err(fail)?;if !source.is_file(){return Err("Choose a regular image file.".into())}let mime=image_mime(&source)?;let bytes=fs::read(&source).map_err(fail)?;if bytes.is_empty()||bytes.len()>20*1024*1024{return Err("Images must be smaller than 20 MB.".into())}
- let stem=article_path.file_stem().and_then(|s|s.to_str()).ok_or("The document name is invalid.")?;let mut safe_stem=String::new();for ch in source.file_stem().and_then(|s|s.to_str()).unwrap_or("image").chars(){if ch.is_ascii_alphanumeric(){safe_stem.push(ch.to_ascii_lowercase())}else if !safe_stem.is_empty()&&!safe_stem.ends_with('-'){safe_stem.push('-')}}let safe_stem=safe_stem.trim_matches('-');let safe_stem=if safe_stem.is_empty(){"image"}else{safe_stem};let ext=source.extension().and_then(|e|e.to_str()).unwrap_or("").to_ascii_lowercase();
- let relative_dir=PathBuf::from("public").join("images").join(family).join(stem);let directory=root.join(&relative_dir);fs::create_dir_all(&directory).map_err(fail)?;let real_directory=directory.canonicalize().map_err(fail)?;if !real_directory.starts_with(&root)||!real_directory.starts_with(root.join("public").canonicalize().map_err(fail)?){return Err("The image destination resolves outside this repository's public folder.".into())}
- let mut filename=format!("{safe_stem}.{ext}");let mut suffix=2;while real_directory.join(&filename).exists(){filename=format!("{safe_stem}-{suffix}.{ext}");suffix+=1}
- let target=real_directory.join(&filename);let mut output=fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(fail)?;if let Err(error)=output.write_all(&bytes).and_then(|_|output.sync_all()){let _=fs::remove_file(&target);return Err(fail(error))}let _=mime;
- Ok(relative_dir.join(filename).to_string_lossy().replace('\\',"/"))
-}
-#[tauri::command] fn read_site_image(path:String,asset:String)->Result<String,String>{
- let root=repo(&path)?;let relative=Path::new(&asset);if relative.is_absolute()||relative.components().any(|c|!matches!(c,std::path::Component::Normal(_)))||!asset.starts_with("images/"){return Err("Invalid public image path.".into())}
- let public=root.join("public").canonicalize().map_err(fail)?;if !public.starts_with(&root){return Err("The site's public folder resolves outside the repository.".into())}let file=public.join(relative);let real=file.canonicalize().map_err(fail)?;if !real.starts_with(&public)||!real.is_file(){return Err("The image is outside the site's public folder.".into())}let mime=image_mime(&real)?;let bytes=fs::read(real).map_err(fail)?;if bytes.len()>20*1024*1024{return Err("Preview images must be smaller than 20 MB.".into())}Ok(format!("data:{mime};base64,{}",STANDARD.encode(bytes)))
-}
-#[tauri::command] fn save_article(path:String,file:String,text:String,expected_hash:String)->Result<String,String>{
- let root=repo(&path)?; let p=safe_file(&root,&file)?; let current=fs::read(&p).map_err(fail)?; if hash(&current)!=expected_hash{return Err("This file changed outside the editor. Reload it or compare changes before saving.".into())}
- let tmp=p.with_extension(format!("{}.editor-tmp",p.extension().and_then(|x|x.to_str()).unwrap_or("md"))); let mut f=fs::File::create(&tmp).map_err(fail)?; f.write_all(text.as_bytes()).map_err(fail)?; f.sync_all().map_err(fail)?; fs::rename(&tmp,&p).map_err(fail)?; Ok(hash(text.as_bytes()))
-}
-#[tauri::command]
-fn environment(path: String) -> Result<Environment, String> {
-    let root = repo(&path)?;
-    let pm = detect_package_manager(&root);
-    let pm_name = pm.as_str().to_string();
-
-    let package: serde_json::Value =
-        serde_json::from_slice(&fs::read(root.join("package.json")).map_err(fail)?).map_err(fail)?;
-    let required = package
-        .get("engines")
-        .and_then(|e| e.get("node"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("not specified")
-        .to_string();
-
-    let (node, node_error) = detected_version(&root, "node");
-    let (pm_ver, pm_error) = detected_version(&root, pm.as_str());
-    let npm_ver = if pm == PackageManager::Npm {
-        pm_ver.clone()
-    } else {
-        let (npm, _) = detected_version(&root, "npm");
-        npm
-    };
-
-    let major = node
-        .trim_start_matches('v')
-        .split('.')
-        .next()
-        .and_then(|v| v.parse::<u64>().ok());
-    let min_major = required
-        .trim_start_matches(|c: char| !c.is_ascii_digit())
-        .split('.')
-        .next()
-        .and_then(|v| v.parse::<u64>().ok());
-    let compatible = major.is_some() && min_major.map_or(true, |min| major.unwrap() >= min);
-    let dependencies = root.join("node_modules").is_dir();
-    let mut messages = Vec::new();
-
-    if node.is_empty() {
-        messages.push("Node.js is not available on this host.".into());
-        if let Some(error) = node_error {
-            messages.push(format!("Node.js check failed: {error}"));
-        }
-    } else if !compatible {
-        messages.push(format!("Detected Node.js {node}; this site requires {required}."));
+    #[test]
+    fn schema_extraction_from_real_fixture_matches_all_rules() {
+        let fixture = include_str!("../../tests/fixtures/content.config.ts");
+        let extracted = env::extract_schema_from_content_config(fixture).expect("schema extraction failed");
+        assert!(extracted.project_statuses.contains(&"Released".to_string()));
+        assert!(extracted.project_drawings.contains(&"airfoils".to_string()));
+        assert!(extracted.project_art.contains(&"wing".to_string()));
+        assert!(extracted.project_visuals.contains(&"mesh".to_string()));
+        assert!(extracted.common_fields.contains(&"title".to_string()));
+        assert!(extracted.project_fields.contains(&"engineering".to_string()));
+        let issues = env::validate_repo_schema(&extracted);
+        assert!(issues.is_empty(), "Validation issues found: {:?}", issues);
     }
 
-    if pm_ver.is_empty() {
-        messages.push(format!("{pm_name} is not available on this host."));
-        if let Some(error) = pm_error {
-            messages.push(format!("{pm_name} check failed: {error}"));
-        }
+    #[test]
+    fn schema_extraction_fails_loudly_on_malformed_input() {
+        assert!(env::extract_schema_from_content_config("").is_err());
+        assert!(env::extract_schema_from_content_config("const x = 1;").is_err());
     }
 
-    if !dependencies {
-        messages.push("Site dependencies are not installed in this repository.".into());
+    #[test]
+    fn detect_package_manager_detects_from_package_json_and_lockfiles() {
+        let dir = std::env::temp_dir().join(format!("pm-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("package.json"), r#"{"packageManager": "bun@1.2.4"}"#).unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Bun);
+
+        fs::write(dir.join("package.json"), r#"{"packageManager": "pnpm@9.0.0"}"#).unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Pnpm);
+
+        fs::write(dir.join("package.json"), r#"{"packageManager": "yarn@4.0.0"}"#).unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Yarn);
+
+        fs::write(dir.join("package.json"), r#"{"packageManager": "npm@10.0.0"}"#).unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Npm);
+
+        fs::write(dir.join("package.json"), r#"{}"#).unwrap();
+        fs::write(dir.join("bun.lock"), "").unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Bun);
+
+        let _ = fs::remove_file(dir.join("bun.lock"));
+        fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Pnpm);
+
+        let _ = fs::remove_file(dir.join("pnpm-lock.yaml"));
+        fs::write(dir.join("yarn.lock"), "").unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Yarn);
+
+        let _ = fs::remove_file(dir.join("yarn.lock"));
+        fs::write(dir.join("package-lock.json"), "").unwrap();
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Npm);
+
+        let _ = fs::remove_file(dir.join("package-lock.json"));
+        assert_eq!(env::detect_package_manager(&dir), env::PackageManager::Npm);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
-    Ok(Environment {
-        package_manager: pm_name,
-        package_manager_version: pm_ver,
-        node_version: node,
-        npm_version: npm_ver,
-        required_node: required,
-        dependencies_installed: dependencies,
-        node_compatible: compatible,
-        messages,
-    })
-}
-
-#[tauri::command]
-fn project_command(path: String, operation: String) -> Result<CommandResult, String> {
-    let root = repo(&path)?;
-    let pm = detect_package_manager(&root);
-    let prog = pm.as_str();
-
-    let args: Vec<&str> = match operation.as_str() {
-        "check" => vec!["run", "check"],
-        "build" => vec!["run", "build"],
-        "install" => match pm {
-            PackageManager::Bun => {
-                if root.join("bun.lock").is_file() {
-                    vec!["install", "--frozen-lockfile"]
-                } else {
-                    vec!["install"]
-                }
-            }
-            PackageManager::Pnpm => {
-                if root.join("pnpm-lock.yaml").is_file() {
-                    vec!["install", "--frozen-lockfile"]
-                } else {
-                    vec!["install"]
-                }
-            }
-            PackageManager::Yarn => {
-                if root.join("yarn.lock").is_file() {
-                    vec!["install", "--immutable"]
-                } else {
-                    vec!["install"]
-                }
-            }
-            PackageManager::Npm => {
-                if root.join("package-lock.json").is_file() {
-                    vec!["ci"]
-                } else {
-                    vec!["install"]
-                }
-            }
-        },
-        _ => return Err("Unsupported operation.".into()),
-    };
-
-    run_host_program(&root, prog, &args)
-}
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct GitStatusEntry {
-    pub index_status: char,
-    pub worktree_status: char,
-    pub path: String,
-    pub orig_path: Option<String>,
-}
-
-pub fn parse_porcelain_z(output: &str) -> Vec<GitStatusEntry> {
-    let mut entries = Vec::new();
-    let mut iter = output.split('\0');
-
-    while let Some(record) = iter.next() {
-        if record.is_empty() || record.len() < 3 {
-            continue;
-        }
-
-        let mut chars = record.chars();
-        let index_status = chars.next().unwrap_or(' ');
-        let worktree_status = chars.next().unwrap_or(' ');
-        let path = record[3..].to_string();
-
-        let is_rename_or_copy = index_status == 'R' || index_status == 'C' || worktree_status == 'R' || worktree_status == 'C';
-        if is_rename_or_copy {
-            if let Some(dest_path) = iter.next() {
-                if !dest_path.is_empty() {
-                    entries.push(GitStatusEntry {
-                        index_status,
-                        worktree_status,
-                        path: dest_path.to_string(),
-                        orig_path: Some(path),
-                    });
-                    continue;
-                }
-            }
-        }
-
-        entries.push(GitStatusEntry {
-            index_status,
-            worktree_status,
-            path,
-            orig_path: None,
-        });
+    #[test]
+    fn allowed_programs_rejects_unauthorized_binaries() {
+        assert!(repo::ALLOWED_PROGRAMS.contains(&"git"));
+        assert!(repo::ALLOWED_PROGRAMS.contains(&"bun"));
+        assert!(repo::ALLOWED_PROGRAMS.contains(&"pnpm"));
+        assert!(repo::ALLOWED_PROGRAMS.contains(&"yarn"));
+        assert!(repo::ALLOWED_PROGRAMS.contains(&"npm"));
+        assert!(repo::ALLOWED_PROGRAMS.contains(&"node"));
+        assert!(!repo::ALLOWED_PROGRAMS.contains(&"sh"));
+        assert!(!repo::ALLOWED_PROGRAMS.contains(&"bash"));
+        assert!(!repo::ALLOWED_PROGRAMS.contains(&"curl"));
     }
 
-    entries
-}
-
-#[tauri::command]
-fn git_diff_file(path: String, file: Option<String>) -> Result<String, String> {
-    let root = repo(&path)?;
-    let args: Vec<String> = if let Some(ref rel) = file {
-        let p = safe_file(&root, rel)?;
-        let safe_rel = p.strip_prefix(&root).map_err(fail)?.to_string_lossy().replace('\\', "/");
-        vec!["diff".into(), "HEAD".into(), "--".into(), safe_rel]
-    } else {
-        vec!["diff".into(), "HEAD".into(), "--".into()]
-    };
-
-    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let result = run_host_program(&root, "git", &arg_refs)?;
-
-    const MAX_DIFF_BYTES: usize = 50_000;
-    if result.output.len() > MAX_DIFF_BYTES {
-        let truncated = &result.output[..MAX_DIFF_BYTES];
-        Ok(format!("{truncated}\n\n[Diff truncated: diff exceeds 50 KB limit]"))
-    } else {
-        Ok(result.output)
-    }
-}
-
-#[tauri::command]
-fn git_info(path: String) -> Result<GitInfo, String> {
-    let root = repo(&path)?;
-    let b = run_host_program(&root, "git", &["branch", "--show-current"])?;
-    if b.code != 0 {
-        return Err(b.output);
-    }
-    let branch = b.output.trim().to_string();
-
-    let u = run_host_program(&root, "git", &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])?;
-    let upstream = if u.code == 0 {
-        u.output.trim().to_string()
-    } else {
-        String::new()
-    };
-
-    let (ahead, behind) = if upstream.is_empty() {
-        (0, 0)
-    } else {
-        let r = run_host_program(&root, "git", &["rev-list", "--left-right", "--count", &format!("HEAD...{}", upstream)])?;
-        parse_counts(&r.output)
-    };
-
-    let s = run_host_program(&root, "git", &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
-    let entries = parse_porcelain_z(&s.output);
-    let changed = entries.into_iter().map(|e| e.path).collect();
-
-    Ok(GitInfo {
-        branch,
-        upstream,
-        ahead,
-        behind,
-        changed,
-        diff: String::new(),
-    })
-}
-
-#[tauri::command]
-fn publish(path: String, message: String) -> Result<CommandResult, String> {
-    let root = repo(&path)?;
-    if message.trim().is_empty() {
-        return Err("Enter a commit message.".into());
+    #[test]
+    fn frontmatter_parsing_ignores_body_draft_in_code_block() {
+        let doc = "---\ntitle: Real Title\ndraft: false\n---\n\n```yaml\ndraft: true\ntitle: Fake Title\n```\n";
+        let (title, draft) = content::parse_frontmatter_metadata(doc);
+        assert_eq!(title, Some("Real Title".to_string()));
+        assert_eq!(draft, false);
     }
 
-    let upstream = run_host_program(&root, "git", &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])?;
-    if upstream.code != 0 {
-        return Err("This branch has no configured upstream. Configure it in Git before publishing.".into());
-    }
-    let upstream = upstream.output.trim().to_string();
-
-    let fetch = run_host_program(&root, "git", &["fetch", "--prune"])?;
-    if fetch.code != 0 {
-        return Ok(fetch);
+    #[test]
+    fn frontmatter_parsing_ignores_nested_title_keys() {
+        let doc = "---\ntitle: Top Level Title\nengineering:\n  title: Nested Spec Title\ndraft: false\n---\nBody\n";
+        let (title, draft) = content::parse_frontmatter_metadata(doc);
+        assert_eq!(title, Some("Top Level Title".to_string()));
+        assert_eq!(draft, false);
     }
 
-    let counts = run_host_program(&root, "git", &["rev-list", "--left-right", "--count", &format!("HEAD...{}", upstream)])?;
-    let (_, behind) = parse_counts(&counts.output);
-    if behind > 0 {
-        return Err(format!("Branch is {behind} commit(s) behind {upstream}. Integrate remote changes before publishing."));
+    #[test]
+    fn frontmatter_parsing_and_duplication_handles_crlf_files() {
+        let doc = "---\r\ntitle: CRLF Article\r\ndraft: false\r\n---\r\n\r\nLine 1\r\nLine 2\r\n";
+        let (title, draft) = content::parse_frontmatter_metadata(doc);
+        assert_eq!(title, Some("CRLF Article".to_string()));
+        assert_eq!(draft, false);
+
+        let duplicated = content::duplicate_article_text(doc, "CRLF Duplicated").unwrap();
+        assert!(duplicated.contains("\r\n"));
+        assert!(!duplicated.contains("\r\r\n"));
+        assert!(duplicated.ends_with("\r\n"));
+        assert!(duplicated.contains("title: \"CRLF Duplicated\""));
+        assert!(duplicated.contains("draft: true"));
+        let (dup_title, dup_draft) = content::parse_frontmatter_metadata(&duplicated);
+        assert_eq!(dup_title, Some("CRLF Duplicated".to_string()));
+        assert_eq!(dup_draft, true);
     }
 
-    let staged = run_host_program(&root, "git", &["diff", "--cached", "--name-only", "-z"])?;
-    let staged_paths: Vec<_> = staged.output.split('\0').filter(|p| !p.is_empty()).collect();
-    if let Some(unrelated) = staged_paths.iter().find(|p| !publishable_path(p)) {
-        return Err(format!("Unrelated files are already staged ({unrelated}). Commit or unstage those changes before publishing."));
+    #[test]
+    fn frontmatter_parsing_handles_folded_multiline_titles() {
+        let doc = "---\ntitle: >\n  This is a folded\n  multiline title\ndraft: false\n---\nBody\n";
+        let (title, _) = content::parse_frontmatter_metadata(doc);
+        assert_eq!(title, Some("This is a folded multiline title".to_string()));
     }
 
-    let status = run_host_program(&root, "git", &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
-    let entries = parse_porcelain_z(&status.output);
-    let mut paths = Vec::<String>::new();
+    #[test]
+    fn frontmatter_parsing_and_duplication_handles_missing_frontmatter() {
+        let doc = "# Plain Markdown with no frontmatter\n\nSome text.\n";
+        let (title, draft) = content::parse_frontmatter_metadata(doc);
+        assert_eq!(title, None);
+        assert_eq!(draft, false);
 
-    for entry in entries {
-        if publishable_path(&entry.path) {
-            if let Some(orig) = entry.orig_path {
-                if publishable_path(&orig) {
-                    paths.push(orig);
-                }
-            }
-            paths.push(entry.path);
-        }
+        let duplicated = content::duplicate_article_text(doc, "Added Frontmatter").unwrap();
+        assert!(duplicated.starts_with("---\n"));
+        assert!(duplicated.contains("title: \"Added Frontmatter\"\n"));
+        assert!(duplicated.contains("draft: true\n"));
+        assert!(duplicated.contains("# Plain Markdown with no frontmatter"));
+        let (dup_title, dup_draft) = content::parse_frontmatter_metadata(&duplicated);
+        assert_eq!(dup_title, Some("Added Frontmatter".to_string()));
+        assert_eq!(dup_draft, true);
     }
 
-    if paths.is_empty() {
-        return Err("No changed writing, project, or public asset files are available to publish.".into());
+    #[test]
+    fn porcelain_z_parsing_handles_standard_records_and_renames() {
+        let raw = " M src/content/writing/article.md\0?? src/content/projects/new.md\0R  src/content/writing/old.md\0src/content/writing/renamed.md\0";
+        let entries = git::parse_porcelain_z(raw);
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].index_status, ' ');
+        assert_eq!(entries[0].worktree_status, 'M');
+        assert_eq!(entries[0].path, "src/content/writing/article.md");
+        assert_eq!(entries[0].orig_path, None);
+
+        assert_eq!(entries[1].index_status, '?');
+        assert_eq!(entries[1].worktree_status, '?');
+        assert_eq!(entries[1].path, "src/content/projects/new.md");
+        assert_eq!(entries[1].orig_path, None);
+
+        assert_eq!(entries[2].index_status, 'R');
+        assert_eq!(entries[2].worktree_status, ' ');
+        assert_eq!(entries[2].path, "src/content/writing/renamed.md");
+        assert_eq!(entries[2].orig_path, Some("src/content/writing/old.md".to_string()));
     }
 
-    let mut cmd = command(&root, "git")?;
-    cmd.arg("add").arg("--").args(&paths);
-    let add = cmd.output().map_err(fail)?;
-    if !add.status.success() {
-        return Err(String::from_utf8_lossy(&add.stderr).to_string());
+    #[test]
+    fn image_magic_bytes_validation() {
+        // PNG valid and invalid
+        let valid_png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+        assert!(images::validate_image_magic_bytes(&valid_png, "png").is_ok());
+        assert!(images::validate_image_magic_bytes(b"badpng", "png").is_err());
+
+        // JPEG valid and invalid
+        let valid_jpeg = [0xFF, 0xD8, 0xFF, 0xE0];
+        assert!(images::validate_image_magic_bytes(&valid_jpeg, "jpg").is_ok());
+        assert!(images::validate_image_magic_bytes(b"badjpeg", "jpg").is_err());
+
+        // SVG script injection rejection
+        let safe_svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><circle r=\"10\"/></svg>";
+        assert!(images::validate_image_magic_bytes(safe_svg, "svg").is_ok());
+        let dangerous_svg = b"<svg><script>alert(1)</script></svg>";
+        assert!(images::validate_image_magic_bytes(dangerous_svg, "svg").is_err());
+        let onload_svg = b"<svg onload=\"alert(1)\"></svg>";
+        assert!(images::validate_image_magic_bytes(onload_svg, "svg").is_err());
     }
-
-    let diff = run_host_program(&root, "git", &["diff", "--cached", "--stat"])?;
-    if diff.output.trim().is_empty() {
-        return Err("There are no staged changes to commit.".into());
-    }
-
-    let commit = command(&root, "git")?.arg("commit").arg("-m").arg(&message).output().map_err(fail)?;
-    if !commit.status.success() {
-        return Err(String::from_utf8_lossy(&commit.stderr).to_string());
-    }
-
-    let push = run_host_program(&root, "git", &["push"])?;
-    if push.code != 0 {
-        return Ok(push);
-    }
-
-    Ok(CommandResult {
-        code: 0,
-        output: format!("{}\n{}\n{}", diff.output, String::from_utf8_lossy(&commit.stdout), push.output),
-    })
-}
-#[tauri::command]
-fn run_dev_server(path: String, state: State<Server>) -> Result<String, String> {
-    let root = repo(&path)?;
-    let mut slot = state.0.lock().map_err(fail)?;
-    if slot.as_mut().is_some_and(|c| c.try_wait().ok().flatten().is_none()) {
-        return Ok("Server is already running.".into());
-    }
-    let pm = detect_package_manager(&root);
-    let prog = pm.as_str();
-    let mut cmd = command(&root, prog)?;
-    let mut child = cmd
-        .args(["run", "dev", "--", "--host", "127.0.0.1", "--port", "4321", "--strictPort"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(fail)?;
-    let address: SocketAddr = "127.0.0.1:4321".parse().unwrap();
-    let mut ready = false;
-    for _ in 0..30 {
-        if child.try_wait().map_err(fail)?.is_some() {
-            break;
-        }
-        if TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok() {
-            ready = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-    if !ready {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(format!(
-            "Astro did not start on port 4321. Check that {prog} and the site's dependencies are installed, and that the port is free."
-        ));
-    }
-    *slot = Some(child);
-    Ok("Astro is running at http://127.0.0.1:4321".into())
-}
-#[tauri::command] fn stop_dev_server(state:State<Server>)->Result<String,String>{let mut slot=state.0.lock().map_err(fail)?;if let Some(mut c)=slot.take(){let _=c.kill();let _=c.wait();}Ok("Astro server stopped.".into())}
-#[derive(Debug, PartialEq, Eq)]
-pub struct ExtractedSchema {
-    pub project_statuses: Vec<String>,
-    pub project_art: Vec<String>,
-    pub project_drawings: Vec<String>,
-    pub project_visuals: Vec<String>,
-    pub common_fields: Vec<String>,
-    pub project_fields: Vec<String>,
-}
-
-pub fn extract_schema_from_content_config(source: &str) -> Result<ExtractedSchema, String> {
-    if source.trim().is_empty() {
-        return Err("Failed to parse site content schema: src/content.config.ts is empty.".to_string());
-    }
-
-    let extract_enum = |pattern: &regex::Regex, name: &str| -> Result<Vec<String>, String> {
-        let caps = pattern.captures(source).ok_or_else(|| {
-            format!("Failed to parse site schema from src/content.config.ts: missing {name} z.enum declaration.")
-        })?;
-        let inner = caps.get(1).or_else(|| caps.get(2)).map(|m| m.as_str()).unwrap_or("");
-        let item_re = regex::Regex::new(r#"['"]([^'"]+)['"]"#).map_err(|e| e.to_string())?;
-        let items: Vec<String> = item_re.captures_iter(inner).map(|c| c[1].to_string()).collect();
-        if items.is_empty() {
-            return Err(format!("Failed to parse site schema from src/content.config.ts: {name} enum is empty."));
-        }
-        Ok(items)
-    };
-
-    let status_re = regex::Regex::new(r#"(?:ProjectStatus\s*=\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)|status\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\))"#).map_err(|e| e.to_string())?;
-    let art_re = regex::Regex::new(r#"art\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)"#).map_err(|e| e.to_string())?;
-    let drawing_re = regex::Regex::new(r#"drawing\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)"#).map_err(|e| e.to_string())?;
-    let visual_re = regex::Regex::new(r#"visual\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)"#).map_err(|e| e.to_string())?;
-
-    let project_statuses = extract_enum(&status_re, "ProjectStatus")?;
-    let project_art = extract_enum(&art_re, "art")?;
-    let project_drawings = extract_enum(&drawing_re, "drawing")?;
-    let project_visuals = extract_enum(&visual_re, "visual")?;
-
-    let common_re = regex::Regex::new(r#"const\s+common\s*=\s*\{([\s\S]*?)\};"#).map_err(|e| e.to_string())?;
-    let common_caps = common_re.captures(source).ok_or_else(|| {
-        "Failed to parse site schema from src/content.config.ts: missing common fields declaration.".to_string()
-    })?;
-    let field_re = regex::Regex::new(r#"(\w+)\s*:\s*z\."#).map_err(|e| e.to_string())?;
-    let common_fields: Vec<String> = field_re.captures_iter(&common_caps[1]).map(|c| c[1].to_string()).collect();
-
-    let project_re = regex::Regex::new(r#"projects\s*:\s*defineCollection\(\{[\s\S]*?schema\s*:\s*z\.object\(\{([\s\S]*?)\}\s*\)\s*\}\)"#).map_err(|e| e.to_string())?;
-    let project_caps = project_re.captures(source).ok_or_else(|| {
-        "Failed to parse site schema from src/content.config.ts: missing projects collection schema.".to_string()
-    })?;
-    let proj_field_re = regex::Regex::new(r#"(\w+)\s*:\s*(?:z\.|ProjectStatus)"#).map_err(|e| e.to_string())?;
-    let project_fields: Vec<String> = proj_field_re.captures_iter(&project_caps[1]).map(|c| c[1].to_string()).collect();
-
-    Ok(ExtractedSchema {
-        project_statuses,
-        project_art,
-        project_drawings,
-        project_visuals,
-        common_fields,
-        project_fields,
-    })
-}
-
-pub fn validate_repo_schema(extracted: &ExtractedSchema) -> Vec<String> {
-    let mut issues = Vec::new();
-    let required_common = ["title", "description", "date", "tags", "draft", "sample", "featured"];
-    for field in required_common {
-        if !extracted.common_fields.iter().any(|f| f == field) {
-            issues.push(format!("The site schema does not declare expected common field '{field}'."));
-        }
-    }
-
-    let required_projects = ["status", "art", "drawing", "engineering", "visual", "visualAccent", "visualImage", "visualImageAlt", "visualLabel", "visualAnimate"];
-    for field in required_projects {
-        if !extracted.project_fields.iter().any(|f| f == field) {
-            issues.push(format!("The site schema does not declare expected project field '{field}'."));
-        }
-    }
-
-    for status in ["Concept", "In Development", "Prototype", "Completed", "Released"] {
-        if !extracted.project_statuses.iter().any(|s| s == status) {
-            issues.push(format!("The site schema does not contain expected project status '{status}'."));
-        }
-    }
-
-    for art in ["wing", "orbit", "code"] {
-        if !extracted.project_art.iter().any(|a| a == art) {
-            issues.push(format!("The site schema does not contain expected project art '{art}'."));
-        }
-    }
-
-    for visual in ["dither", "grain", "mesh", "grid", "dots", "asset", "screenshot"] {
-        if !extracted.project_visuals.iter().any(|v| v == visual) {
-            issues.push(format!("The site schema does not contain expected project visual '{visual}'."));
-        }
-    }
-
-    for drawing in ["airfoils", "bwb", "uki", "gofr", "rocket", "wing", "orbit", "code"] {
-        if !extracted.project_drawings.iter().any(|d| d == drawing) {
-            issues.push(format!("The site schema does not contain expected project drawing '{drawing}'."));
-        }
-    }
-
-    issues
-}
-
-#[tauri::command]
-fn validate_repo(path: String) -> Result<Vec<String>, String> {
-    let root = repo(&path)?;
-    let schema_path = root.join("src/content.config.ts");
-    if !schema_path.exists() {
-        return Err("Repository is missing src/content.config.ts".to_string());
-    }
-    let schema_text = fs::read_to_string(&schema_path).map_err(fail)?;
-    let extracted = extract_schema_from_content_config(&schema_text)?;
-    Ok(validate_repo_schema(&extracted))
-}
-#[cfg_attr(mobile, tauri::mobile_entry_point)] pub fn run(){tauri::Builder::default().manage(Server(Mutex::new(None))).plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init()).invoke_handler(tauri::generate_handler![list_content,create_article,rename_article,delete_article,duplicate_article,read_article,save_article,import_site_image,read_site_image,project_command,environment,git_info,git_diff_file,publish,run_dev_server,stop_dev_server,validate_repo]).run(tauri::generate_context!()).expect("error while running Tauri application");}
-
-#[cfg(test)] mod tests {
- use super::*;
- #[test] fn git_ahead_behind_counts_are_parsed_in_order(){assert_eq!(parse_counts("3\t2\n"),(3,2));assert_eq!(parse_counts("bad 4"),(0,4));assert_eq!(parse_counts(""),(0,0));}
- #[test] fn publish_allowlist_excludes_site_code_and_non_asset_public_files(){assert!(publishable_path("src/content/writing/story.mdx"));assert!(publishable_path("public/images/rocket.webp"));assert!(!publishable_path("src/pages/index.astro"));assert!(!publishable_path("public/.env"));assert!(!publishable_path("public/scripts/app.js"));}
- #[test] fn repository_file_paths_cannot_escape_or_follow_outside_symlinks(){let dir=std::env::temp_dir().join(format!("site-editor-path-test-{}",std::process::id()));let outside=dir.with_extension("outside");let _=fs::remove_dir_all(&dir);let _=fs::remove_file(&outside);fs::create_dir_all(&dir).unwrap();fs::write(dir.join("entry.md"),"safe").unwrap();fs::write(&outside,"outside").unwrap();#[cfg(unix)] std::os::unix::fs::symlink(&outside,dir.join("escape.md")).unwrap();assert!(safe_file(&dir,"entry.md").is_ok());assert!(safe_file(&dir,"../outside").is_err());#[cfg(unix)] assert!(safe_file(&dir,"escape.md").is_err());let _=fs::remove_dir_all(&dir);let _=fs::remove_file(&outside);}
- #[test] fn schema_extraction_from_real_fixture_matches_all_rules() {
-  let fixture = include_str!("../../tests/fixtures/content.config.ts");
-  let extracted = extract_schema_from_content_config(fixture).expect("schema extraction failed");
-  assert!(extracted.project_statuses.contains(&"Released".to_string()));
-  assert!(extracted.project_drawings.contains(&"airfoils".to_string()));
-  assert!(extracted.project_art.contains(&"wing".to_string()));
-  assert!(extracted.project_visuals.contains(&"mesh".to_string()));
-  assert!(extracted.common_fields.contains(&"title".to_string()));
-  assert!(extracted.project_fields.contains(&"engineering".to_string()));
-  let issues = validate_repo_schema(&extracted);
-  assert!(issues.is_empty(), "Validation issues found: {:?}", issues);
- }
- #[test] fn schema_extraction_fails_loudly_on_malformed_input() {
-  assert!(extract_schema_from_content_config("").is_err());
-  assert!(extract_schema_from_content_config("const x = 1;").is_err());
- }
- #[test] fn detect_package_manager_detects_from_package_json_and_lockfiles() {
-  let dir = std::env::temp_dir().join(format!("pm-test-{}", std::process::id()));
-  let _ = fs::remove_dir_all(&dir);
-  fs::create_dir_all(&dir).unwrap();
-
-  fs::write(dir.join("package.json"), r#"{"packageManager": "bun@1.2.4"}"#).unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Bun);
-
-  fs::write(dir.join("package.json"), r#"{"packageManager": "pnpm@9.0.0"}"#).unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Pnpm);
-
-  fs::write(dir.join("package.json"), r#"{"packageManager": "yarn@4.0.0"}"#).unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Yarn);
-
-  fs::write(dir.join("package.json"), r#"{"packageManager": "npm@10.0.0"}"#).unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Npm);
-
-  fs::write(dir.join("package.json"), r#"{}"#).unwrap();
-  fs::write(dir.join("bun.lock"), "").unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Bun);
-
-  let _ = fs::remove_file(dir.join("bun.lock"));
-  fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Pnpm);
-
-  let _ = fs::remove_file(dir.join("pnpm-lock.yaml"));
-  fs::write(dir.join("yarn.lock"), "").unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Yarn);
-
-  let _ = fs::remove_file(dir.join("yarn.lock"));
-  fs::write(dir.join("package-lock.json"), "").unwrap();
-  assert_eq!(detect_package_manager(&dir), PackageManager::Npm);
-
-  let _ = fs::remove_file(dir.join("package-lock.json"));
-  assert_eq!(detect_package_manager(&dir), PackageManager::Npm);
-
-  let _ = fs::remove_dir_all(&dir);
- }
- #[test] fn allowed_programs_rejects_unauthorized_binaries() {
-  assert!(ALLOWED_PROGRAMS.contains(&"git"));
-  assert!(ALLOWED_PROGRAMS.contains(&"bun"));
-  assert!(ALLOWED_PROGRAMS.contains(&"pnpm"));
-  assert!(ALLOWED_PROGRAMS.contains(&"yarn"));
-  assert!(ALLOWED_PROGRAMS.contains(&"npm"));
-  assert!(ALLOWED_PROGRAMS.contains(&"node"));
-  assert!(!ALLOWED_PROGRAMS.contains(&"sh"));
-  assert!(!ALLOWED_PROGRAMS.contains(&"bash"));
-  assert!(!ALLOWED_PROGRAMS.contains(&"curl"));
- }
- #[test] fn frontmatter_parsing_ignores_body_draft_in_code_block() {
-  let doc = "---\ntitle: Real Title\ndraft: false\n---\n\n```yaml\ndraft: true\ntitle: Fake Title\n```\n";
-  let (title, draft) = parse_frontmatter_metadata(doc);
-  assert_eq!(title, Some("Real Title".to_string()));
-  assert_eq!(draft, false);
- }
- #[test] fn frontmatter_parsing_ignores_nested_title_keys() {
-  let doc = "---\ntitle: Top Level Title\nengineering:\n  title: Nested Spec Title\ndraft: false\n---\nBody\n";
-  let (title, draft) = parse_frontmatter_metadata(doc);
-  assert_eq!(title, Some("Top Level Title".to_string()));
-  assert_eq!(draft, false);
- }
- #[test] fn frontmatter_parsing_and_duplication_handles_crlf_files() {
-  let doc = "---\r\ntitle: CRLF Article\r\ndraft: false\r\n---\r\n\r\nLine 1\r\nLine 2\r\n";
-  let (title, draft) = parse_frontmatter_metadata(doc);
-  assert_eq!(title, Some("CRLF Article".to_string()));
-  assert_eq!(draft, false);
-
-  let duplicated = duplicate_article_text(doc, "CRLF Duplicated").unwrap();
-  assert!(duplicated.contains("\r\n"));
-  assert!(!duplicated.contains("\r\r\n"));
-  assert!(duplicated.ends_with("\r\n"));
-  assert!(duplicated.contains("title: \"CRLF Duplicated\""));
-  assert!(duplicated.contains("draft: true"));
-  let (dup_title, dup_draft) = parse_frontmatter_metadata(&duplicated);
-  assert_eq!(dup_title, Some("CRLF Duplicated".to_string()));
-  assert_eq!(dup_draft, true);
- }
- #[test] fn frontmatter_parsing_handles_folded_multiline_titles() {
-  let doc = "---\ntitle: >\n  This is a folded\n  multiline title\ndraft: false\n---\nBody\n";
-  let (title, _) = parse_frontmatter_metadata(doc);
-  assert_eq!(title, Some("This is a folded multiline title".to_string()));
- }
- #[test] fn frontmatter_parsing_and_duplication_handles_missing_frontmatter() {
-  let doc = "# Plain Markdown with no frontmatter\n\nSome text.\n";
-  let (title, draft) = parse_frontmatter_metadata(doc);
-  assert_eq!(title, None);
-  assert_eq!(draft, false);
-
-  let duplicated = duplicate_article_text(doc, "Added Frontmatter").unwrap();
-  assert!(duplicated.starts_with("---\n"));
-  assert!(duplicated.contains("title: \"Added Frontmatter\"\n"));
-  assert!(duplicated.contains("draft: true\n"));
-  assert!(duplicated.contains("# Plain Markdown with no frontmatter"));
-  let (dup_title, dup_draft) = parse_frontmatter_metadata(&duplicated);
-  assert_eq!(dup_title, Some("Added Frontmatter".to_string()));
-  assert_eq!(dup_draft, true);
- }
- #[test] fn porcelain_z_parsing_handles_standard_records_and_renames() {
-  let raw = " M src/content/writing/article.md\0?? src/content/projects/new.md\0R  src/content/writing/old.md\0src/content/writing/renamed.md\0";
-  let entries = parse_porcelain_z(raw);
-  assert_eq!(entries.len(), 3);
-
-  assert_eq!(entries[0].index_status, ' ');
-  assert_eq!(entries[0].worktree_status, 'M');
-  assert_eq!(entries[0].path, "src/content/writing/article.md");
-  assert_eq!(entries[0].orig_path, None);
-
-  assert_eq!(entries[1].index_status, '?');
-  assert_eq!(entries[1].worktree_status, '?');
-  assert_eq!(entries[1].path, "src/content/projects/new.md");
-  assert_eq!(entries[1].orig_path, None);
-
-  assert_eq!(entries[2].index_status, 'R');
-  assert_eq!(entries[2].worktree_status, ' ');
-  assert_eq!(entries[2].path, "src/content/writing/renamed.md");
-  assert_eq!(entries[2].orig_path, Some("src/content/writing/old.md".to_string()));
- }
 }

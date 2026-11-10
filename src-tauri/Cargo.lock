@@ -1331,6 +1331,7 @@ name = "glitchys-site-editor"
 version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
+ "libc",
  "regex",
  "serde",
  "serde_json",
