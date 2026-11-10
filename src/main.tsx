@@ -33,6 +33,7 @@ import { KeyboardShortcutsDialog } from './components/modals/KeyboardShortcutsDi
 import { RenameDialog } from './components/modals/RenameDialog';
 import { DuplicateDialog } from './components/modals/DuplicateDialog';
 import { DeleteDialog } from './components/modals/DeleteDialog';
+import { useShortcuts } from './hooks/useShortcuts';
 import './style.css';
 
 type FileData = { text: string; hash: string };
@@ -154,45 +155,6 @@ function App() {
       getCurrentWindow().setTitle(titleStr).catch(() => {});
     }
   }, [selected?.title, metadata.title, dirty, native]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      const isInputFocused =
-        activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement;
-
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        if (selected && dirty && !busy) {
-          void save();
-        }
-      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 't') {
-        e.preventDefault();
-        setTheme(t => (t === 'dark' ? 'light' : 'dark'));
-      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
-        e.preventDefault();
-        setOutlineOpen(o => !o);
-      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        setWordWrap(w => !w);
-      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
-        e.preventDefault();
-        setSourceMode(sm => !sm);
-      } else if (e.key === '?' && !isInputFocused) {
-        e.preventDefault();
-        setShortcutsOpen(true);
-      } else if (e.key === 'Escape') {
-        if (shortcutsOpen) setShortcutsOpen(false);
-        else if (outlineOpen) setOutlineOpen(false);
-        else if (appearanceDialog) setAppearanceDialog(false);
-        else if (publishDialog) setPublishDialog(false);
-        else if (newDialog) setNewDialog(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selected, dirty, busy, shortcutsOpen, outlineOpen, appearanceDialog, publishDialog, newDialog, source, metadata]);
 
   useEffect(() => {
     const hex = appAccent.slice(1);
@@ -601,28 +563,34 @@ function App() {
     return true;
   }
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        void save();
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        document.querySelector<HTMLInputElement>('.search-box input')?.focus();
-      }
-      if (event.key === 'Escape') {
-        setPublishDialog(false);
-        setAppearanceDialog(false);
-        setNewDialog(false);
-        setRenameTarget(null);
-        setDuplicateTarget(null);
-        setDeleteTarget(null);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [dirty, selected, source, metadata, hash, repository]);
+  useShortcuts({
+    selected,
+    dirty,
+    busy,
+    shortcutsOpen,
+    outlineOpen,
+    appearanceDialog,
+    publishDialog,
+    newDialog,
+    renameTarget,
+    duplicateTarget,
+    deleteTarget,
+    onSave: save,
+    onToggleTheme: () => setTheme(t => (t === 'dark' ? 'light' : 'dark')),
+    onToggleOutline: () => setOutlineOpen(o => !o),
+    onToggleWordWrap: () => setWordWrap(w => !w),
+    onToggleSourceMode: () => setSourceMode(sm => !sm),
+    onOpenShortcuts: () => setShortcutsOpen(true),
+    onCloseShortcuts: () => setShortcutsOpen(false),
+    onCloseOutline: () => setOutlineOpen(false),
+    onCloseAppearanceDialog: () => setAppearanceDialog(false),
+    onClosePublishDialog: () => setPublishDialog(false),
+    onCloseNewDialog: () => setNewDialog(false),
+    onCloseRenameDialog: () => setRenameTarget(null),
+    onCloseDuplicateDialog: () => setDuplicateTarget(null),
+    onCloseDeleteDialog: () => setDeleteTarget(null),
+    onSearchFocus: () => document.querySelector<HTMLInputElement>('.search-box input')?.focus(),
+  });
 
   function insertMarkdown(before: string, after = '', linePrefix?: string, placeholder = 'text') {
     const editor = sourceMode || selected?.path.endsWith('.mdx') ? sourceEditor.current : bodyEditor.current;
