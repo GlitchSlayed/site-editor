@@ -11,7 +11,7 @@ impl Drop for Server{fn drop(&mut self){if let Ok(slot)=self.0.get_mut(){if let 
 #[derive(Serialize)] struct FileData { text: String, hash: String }
 #[derive(Serialize)] struct CommandResult { code: i32, output: String }
 #[derive(Serialize)] struct GitInfo { branch: String, upstream: String, ahead: usize, behind: usize, changed: Vec<String>, diff: String }
-#[derive(Serialize)] struct Environment { node_version: String, npm_version: String, required_node: String, dependencies_installed: bool, node_compatible: bool, messages: Vec<String> }
+#[derive(Serialize)] struct Environment { package_manager: String, package_manager_version: String, node_version: String, npm_version: String, required_node: String, dependencies_installed: bool, node_compatible: bool, messages: Vec<String> }
 fn fail<T: std::fmt::Display>(e:T)->String { e.to_string() }
 fn repo(path:&str)->Result<PathBuf,String> {
  let p=Path::new(path).canonicalize().map_err(fail)?;
@@ -114,17 +114,78 @@ fn host_repository(root:&Path)->Result<PathBuf,String>{
  }
  Err("The site folder’s document portal grant is missing. Reopen the repository with the folder picker, then save again.".into())
 }
+const ALLOWED_PROGRAMS: &[&str] = &["git", "node", "npm", "bun", "pnpm", "yarn"];
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PackageManager {
+    Bun,
+    Pnpm,
+    Yarn,
+    Npm,
+}
+
+impl PackageManager {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PackageManager::Bun => "bun",
+            PackageManager::Pnpm => "pnpm",
+            PackageManager::Yarn => "yarn",
+            PackageManager::Npm => "npm",
+        }
+    }
+}
+
+pub fn detect_package_manager(root: &Path) -> PackageManager {
+    if let Ok(data) = fs::read(root.join("package.json")) {
+        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
+            if let Some(pm_str) = val.get("packageManager").and_then(|v| v.as_str()) {
+                let trimmed = pm_str.trim().to_lowercase();
+                if trimmed.starts_with("bun") {
+                    return PackageManager::Bun;
+                } else if trimmed.starts_with("pnpm") {
+                    return PackageManager::Pnpm;
+                } else if trimmed.starts_with("yarn") {
+                    return PackageManager::Yarn;
+                } else if trimmed.starts_with("npm") {
+                    return PackageManager::Npm;
+                }
+            }
+        }
+    }
+
+    if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
+        PackageManager::Bun
+    } else if root.join("pnpm-lock.yaml").exists() {
+        PackageManager::Pnpm
+    } else if root.join("yarn.lock").exists() {
+        PackageManager::Yarn
+    } else if root.join("package-lock.json").exists() {
+        PackageManager::Npm
+    } else {
+        PackageManager::Npm
+    }
+}
+
 fn command(root:&Path, program:&str)->Result<Command,String>{
- if std::env::var_os("FLATPAK_ID").is_some(){let host_root=host_repository(root)?;let mut c=Command::new("flatpak-spawn");c.arg("--host").arg("--watch-bus").arg(format!("--directory={}",host_root.display())).arg(program);Ok(c)}
- else{let mut c=Command::new(program);c.current_dir(root);Ok(c)}
+    if !ALLOWED_PROGRAMS.contains(&program) {
+        return Err(format!("Program '{program}' is not in the allowed command list."));
+    }
+    if std::env::var_os("FLATPAK_ID").is_some(){let host_root=host_repository(root)?;let mut c=Command::new("flatpak-spawn");c.arg("--host").arg("--watch-bus").arg(format!("--directory={}",host_root.display())).arg(program);Ok(c)}
+    else{let mut c=Command::new(program);c.current_dir(root);Ok(c)}
 }
 fn run_host_program(root:&Path, program:&str, args:&[&str])->Result<CommandResult,String>{
- let o=command(root,program)?.args(args).output().map_err(fail)?;
- Ok(CommandResult{code:o.status.code().unwrap_or(-1),output:String::from_utf8_lossy(&o.stdout).to_string()+&String::from_utf8_lossy(&o.stderr)})
+    if !ALLOWED_PROGRAMS.contains(&program) {
+        return Err(format!("Program '{program}' is not in the allowed command list."));
+    }
+    let o=command(root,program)?.args(args).output().map_err(fail)?;
+    Ok(CommandResult{code:o.status.code().unwrap_or(-1),output:String::from_utf8_lossy(&o.stdout).to_string()+&String::from_utf8_lossy(&o.stderr)})
 }
 fn run_host_version(root:&Path,program:&str)->Result<CommandResult,String>{
- let o=if std::env::var_os("FLATPAK_ID").is_some(){Command::new("flatpak-spawn").args(["--host","--watch-bus",program,"--version"]).output().map_err(fail)?}else{command(root,program)?.arg("--version").output().map_err(fail)?};
- Ok(CommandResult{code:o.status.code().unwrap_or(-1),output:String::from_utf8_lossy(&o.stdout).to_string()+&String::from_utf8_lossy(&o.stderr)})
+    if !ALLOWED_PROGRAMS.contains(&program) {
+        return Err(format!("Program '{program}' is not in the allowed command list."));
+    }
+    let o=if std::env::var_os("FLATPAK_ID").is_some(){Command::new("flatpak-spawn").args(["--host","--watch-bus",program,"--version"]).output().map_err(fail)?}else{command(root,program)?.arg("--version").output().map_err(fail)?};
+    Ok(CommandResult{code:o.status.code().unwrap_or(-1),output:String::from_utf8_lossy(&o.stdout).to_string()+&String::from_utf8_lossy(&o.stderr)})
 }
 fn detected_version(root:&Path,program:&str)->(String,Option<String>){
  match run_host_version(root,program){Ok(result) if result.code==0=>(result.output.trim().to_string(),None),Ok(result)=>(String::new(),Some(if result.output.trim().is_empty(){format!("{program} exited with code {}.",result.code)}else{result.output.trim().to_string()})),Err(error)=>(String::new(),Some(error))}
@@ -157,8 +218,120 @@ fn image_mime(path:&Path)->Result<&'static str,String>{match path.extension().an
  let root=repo(&path)?; let p=safe_file(&root,&file)?; let current=fs::read(&p).map_err(fail)?; if hash(&current)!=expected_hash{return Err("This file changed outside the editor. Reload it or compare changes before saving.".into())}
  let tmp=p.with_extension(format!("{}.editor-tmp",p.extension().and_then(|x|x.to_str()).unwrap_or("md"))); let mut f=fs::File::create(&tmp).map_err(fail)?; f.write_all(text.as_bytes()).map_err(fail)?; f.sync_all().map_err(fail)?; fs::rename(&tmp,&p).map_err(fail)?; Ok(hash(text.as_bytes()))
 }
-#[tauri::command] fn environment(path:String)->Result<Environment,String>{let root=repo(&path)?;let package:serde_json::Value=serde_json::from_slice(&fs::read(root.join("package.json")).map_err(fail)?).map_err(fail)?;let required=package.get("engines").and_then(|e|e.get("node")).and_then(|v|v.as_str()).unwrap_or("not specified").to_string();let (node,node_error)=detected_version(&root,"node");let (npm,npm_error)=detected_version(&root,"npm");let major=node.trim_start_matches('v').split('.').next().and_then(|v|v.parse::<u64>().ok());let min_major=required.trim_start_matches(|c:char|!c.is_ascii_digit()).split('.').next().and_then(|v|v.parse::<u64>().ok());let compatible=major.is_some()&&min_major.map_or(true,|min|major.unwrap()>=min);let dependencies=root.join("node_modules").is_dir();let mut messages=Vec::new();if node.is_empty(){messages.push("Node.js is not available on this host.".into());if let Some(error)=node_error{messages.push(format!("Node.js check failed: {error}"))}}else if !compatible{messages.push(format!("Detected Node.js {node}; this site requires {required}."))}if npm.is_empty(){messages.push("npm is not available on this host.".into());if let Some(error)=npm_error{messages.push(format!("npm check failed: {error}"))}}if !dependencies{messages.push("Site dependencies are not installed in this repository.".into())}Ok(Environment{node_version:node,npm_version:npm,required_node:required,dependencies_installed:dependencies,node_compatible:compatible,messages})}
-#[tauri::command] fn project_command(path:String,operation:String)->Result<CommandResult,String>{let root=repo(&path)?;let (prog,args):(&str,Vec<&str>)=match operation.as_str(){"check"=>("npm",vec!["run","check"]),"build"=>("npm",vec!["run","build"]),"install"=>if root.join("package-lock.json").is_file(){("npm",vec!["ci"])}else{("npm",vec!["install"])},_=>return Err("Unsupported operation.".into())}; run_host_program(&root,prog,&args)}
+#[tauri::command]
+fn environment(path: String) -> Result<Environment, String> {
+    let root = repo(&path)?;
+    let pm = detect_package_manager(&root);
+    let pm_name = pm.as_str().to_string();
+
+    let package: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("package.json")).map_err(fail)?).map_err(fail)?;
+    let required = package
+        .get("engines")
+        .and_then(|e| e.get("node"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("not specified")
+        .to_string();
+
+    let (node, node_error) = detected_version(&root, "node");
+    let (pm_ver, pm_error) = detected_version(&root, pm.as_str());
+    let npm_ver = if pm == PackageManager::Npm {
+        pm_ver.clone()
+    } else {
+        let (npm, _) = detected_version(&root, "npm");
+        npm
+    };
+
+    let major = node
+        .trim_start_matches('v')
+        .split('.')
+        .next()
+        .and_then(|v| v.parse::<u64>().ok());
+    let min_major = required
+        .trim_start_matches(|c: char| !c.is_ascii_digit())
+        .split('.')
+        .next()
+        .and_then(|v| v.parse::<u64>().ok());
+    let compatible = major.is_some() && min_major.map_or(true, |min| major.unwrap() >= min);
+    let dependencies = root.join("node_modules").is_dir();
+    let mut messages = Vec::new();
+
+    if node.is_empty() {
+        messages.push("Node.js is not available on this host.".into());
+        if let Some(error) = node_error {
+            messages.push(format!("Node.js check failed: {error}"));
+        }
+    } else if !compatible {
+        messages.push(format!("Detected Node.js {node}; this site requires {required}."));
+    }
+
+    if pm_ver.is_empty() {
+        messages.push(format!("{pm_name} is not available on this host."));
+        if let Some(error) = pm_error {
+            messages.push(format!("{pm_name} check failed: {error}"));
+        }
+    }
+
+    if !dependencies {
+        messages.push("Site dependencies are not installed in this repository.".into());
+    }
+
+    Ok(Environment {
+        package_manager: pm_name,
+        package_manager_version: pm_ver,
+        node_version: node,
+        npm_version: npm_ver,
+        required_node: required,
+        dependencies_installed: dependencies,
+        node_compatible: compatible,
+        messages,
+    })
+}
+
+#[tauri::command]
+fn project_command(path: String, operation: String) -> Result<CommandResult, String> {
+    let root = repo(&path)?;
+    let pm = detect_package_manager(&root);
+    let prog = pm.as_str();
+
+    let args: Vec<&str> = match operation.as_str() {
+        "check" => vec!["run", "check"],
+        "build" => vec!["run", "build"],
+        "install" => match pm {
+            PackageManager::Bun => {
+                if root.join("bun.lock").is_file() {
+                    vec!["install", "--frozen-lockfile"]
+                } else {
+                    vec!["install"]
+                }
+            }
+            PackageManager::Pnpm => {
+                if root.join("pnpm-lock.yaml").is_file() {
+                    vec!["install", "--frozen-lockfile"]
+                } else {
+                    vec!["install"]
+                }
+            }
+            PackageManager::Yarn => {
+                if root.join("yarn.lock").is_file() {
+                    vec!["install", "--immutable"]
+                } else {
+                    vec!["install"]
+                }
+            }
+            PackageManager::Npm => {
+                if root.join("package-lock.json").is_file() {
+                    vec!["ci"]
+                } else {
+                    vec!["install"]
+                }
+            }
+        },
+        _ => return Err("Unsupported operation.".into()),
+    };
+
+    run_host_program(&root, prog, &args)
+}
 #[tauri::command] fn git_info(path:String)->Result<GitInfo,String>{
  let root=repo(&path)?;let b=run_host_program(&root,"git",&["branch","--show-current"])?;if b.code!=0{return Err(b.output)} let branch=b.output.trim().to_string();let u=run_host_program(&root,"git",&["rev-parse","--abbrev-ref","--symbolic-full-name","@{upstream}"])?;let upstream=if u.code==0{u.output.trim().to_string()}else{String::new()}; let (ahead,behind)=if upstream.is_empty(){(0,0)}else{let r=run_host_program(&root,"git",&["rev-list","--left-right","--count",&format!("HEAD...{}",upstream)])?;parse_counts(&r.output)};let s=run_host_program(&root,"git",&["status","--short"])?;let changed=s.output.lines().map(|l|l.get(3..).unwrap_or(l).to_string()).collect();let d=run_host_program(&root,"git",&["diff","HEAD","--"])?;Ok(GitInfo{branch,upstream,ahead,behind,changed,diff:d.output})
 }
@@ -171,7 +344,44 @@ fn image_mime(path:&Path)->Result<&'static str,String>{match path.extension().an
  let diff=run_host_program(&root,"git",&["diff","--cached","--stat"])?;if diff.output.trim().is_empty(){return Err("There are no staged changes to commit.".into())}
  let commit=command(&root,"git")?.arg("commit").arg("-m").arg(&message).output().map_err(fail)?;if !commit.status.success(){return Err(String::from_utf8_lossy(&commit.stderr).to_string())}let push=run_host_program(&root,"git",&["push"])?;if push.code!=0{return Ok(push)}Ok(CommandResult{code:0,output:format!("{}\n{}\n{}",diff.output,String::from_utf8_lossy(&commit.stdout),push.output)})
 }
-#[tauri::command] fn run_dev_server(path:String,state:State<Server>)->Result<String,String>{let root=repo(&path)?;let mut slot=state.0.lock().map_err(fail)?;if slot.as_mut().is_some_and(|c|c.try_wait().ok().flatten().is_none()){return Ok("Server is already running.".into())}let mut cmd=command(&root,"npm")?;let mut child=cmd.args(["run","dev","--","--host","127.0.0.1","--port","4321","--strictPort"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(fail)?;let address:SocketAddr="127.0.0.1:4321".parse().unwrap();let mut ready=false;for _ in 0..30{if child.try_wait().map_err(fail)?.is_some(){break}if TcpStream::connect_timeout(&address,Duration::from_millis(100)).is_ok(){ready=true;break}thread::sleep(Duration::from_millis(100));}if !ready{let _=child.kill();let _=child.wait();return Err("Astro did not start on port 4321. Check that Node.js/npm and the site's dependencies are installed, and that the port is free.".into())}*slot=Some(child);Ok("Astro is running at http://127.0.0.1:4321".into())}
+#[tauri::command]
+fn run_dev_server(path: String, state: State<Server>) -> Result<String, String> {
+    let root = repo(&path)?;
+    let mut slot = state.0.lock().map_err(fail)?;
+    if slot.as_mut().is_some_and(|c| c.try_wait().ok().flatten().is_none()) {
+        return Ok("Server is already running.".into());
+    }
+    let pm = detect_package_manager(&root);
+    let prog = pm.as_str();
+    let mut cmd = command(&root, prog)?;
+    let mut child = cmd
+        .args(["run", "dev", "--", "--host", "127.0.0.1", "--port", "4321", "--strictPort"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(fail)?;
+    let address: SocketAddr = "127.0.0.1:4321".parse().unwrap();
+    let mut ready = false;
+    for _ in 0..30 {
+        if child.try_wait().map_err(fail)?.is_some() {
+            break;
+        }
+        if TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok() {
+            ready = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    if !ready {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!(
+            "Astro did not start on port 4321. Check that {prog} and the site's dependencies are installed, and that the port is free."
+        ));
+    }
+    *slot = Some(child);
+    Ok("Astro is running at http://127.0.0.1:4321".into())
+}
 #[tauri::command] fn stop_dev_server(state:State<Server>)->Result<String,String>{let mut slot=state.0.lock().map_err(fail)?;if let Some(mut c)=slot.take(){let _=c.kill();let _=c.wait();}Ok("Astro server stopped.".into())}
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExtractedSchema {
@@ -311,5 +521,54 @@ fn validate_repo(path: String) -> Result<Vec<String>, String> {
  #[test] fn schema_extraction_fails_loudly_on_malformed_input() {
   assert!(extract_schema_from_content_config("").is_err());
   assert!(extract_schema_from_content_config("const x = 1;").is_err());
+ }
+ #[test] fn detect_package_manager_detects_from_package_json_and_lockfiles() {
+  let dir = std::env::temp_dir().join(format!("pm-test-{}", std::process::id()));
+  let _ = fs::remove_dir_all(&dir);
+  fs::create_dir_all(&dir).unwrap();
+
+  fs::write(dir.join("package.json"), r#"{"packageManager": "bun@1.2.4"}"#).unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Bun);
+
+  fs::write(dir.join("package.json"), r#"{"packageManager": "pnpm@9.0.0"}"#).unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Pnpm);
+
+  fs::write(dir.join("package.json"), r#"{"packageManager": "yarn@4.0.0"}"#).unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Yarn);
+
+  fs::write(dir.join("package.json"), r#"{"packageManager": "npm@10.0.0"}"#).unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Npm);
+
+  fs::write(dir.join("package.json"), r#"{}"#).unwrap();
+  fs::write(dir.join("bun.lock"), "").unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Bun);
+
+  let _ = fs::remove_file(dir.join("bun.lock"));
+  fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Pnpm);
+
+  let _ = fs::remove_file(dir.join("pnpm-lock.yaml"));
+  fs::write(dir.join("yarn.lock"), "").unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Yarn);
+
+  let _ = fs::remove_file(dir.join("yarn.lock"));
+  fs::write(dir.join("package-lock.json"), "").unwrap();
+  assert_eq!(detect_package_manager(&dir), PackageManager::Npm);
+
+  let _ = fs::remove_file(dir.join("package-lock.json"));
+  assert_eq!(detect_package_manager(&dir), PackageManager::Npm);
+
+  let _ = fs::remove_dir_all(&dir);
+ }
+ #[test] fn allowed_programs_rejects_unauthorized_binaries() {
+  assert!(ALLOWED_PROGRAMS.contains(&"git"));
+  assert!(ALLOWED_PROGRAMS.contains(&"bun"));
+  assert!(ALLOWED_PROGRAMS.contains(&"pnpm"));
+  assert!(ALLOWED_PROGRAMS.contains(&"yarn"));
+  assert!(ALLOWED_PROGRAMS.contains(&"npm"));
+  assert!(ALLOWED_PROGRAMS.contains(&"node"));
+  assert!(!ALLOWED_PROGRAMS.contains(&"sh"));
+  assert!(!ALLOWED_PROGRAMS.contains(&"bash"));
+  assert!(!ALLOWED_PROGRAMS.contains(&"curl"));
  }
 }

@@ -412,7 +412,7 @@ function App() {
 
   async function chooseRepository() {
     if (!native) {
-      setNotice('Browser mode cannot access local folders, run npm or Git. Open the Tauri desktop app for repository access.');
+      setNotice('Browser mode cannot access local folders, run package manager commands, or run Git. Open the Tauri desktop app for repository access.');
       return;
     }
     try {
@@ -827,11 +827,12 @@ function App() {
 
   async function command(operation: 'check' | 'build') {
     setBusy(true);
-    setOutput(`Running npm run ${operation}…`);
+    const pm = environment?.package_manager || 'npm';
+    setOutput(`Running ${pm} run ${operation}…`);
     try {
       const r = await invoke<CommandResult>('project_command', { path: repository, operation });
       setOutput(r.output || `Exited with code ${r.code}`);
-      setNotice(r.code === 0 ? `npm run ${operation} completed.` : `npm run ${operation} failed.`);
+      setNotice(r.code === 0 ? `${pm} run ${operation} completed.` : `${pm} run ${operation} failed.`);
     } catch (e) {
       setOutput(String(e));
     } finally {
@@ -886,15 +887,16 @@ function App() {
       return;
     }
     setBusy(true);
+    const pm = environment?.package_manager || 'npm';
     try {
-      setOutput('Running npm run check…');
+      setOutput(`Running ${pm} run check…`);
       const check = await invoke<CommandResult>('project_command', { path: repository, operation: 'check' });
       setOutput(check.output);
       if (check.code !== 0) {
         setNotice('Check failed. Review the output before publishing.');
         return;
       }
-      setOutput('Running npm run build…');
+      setOutput(`Running ${pm} run build…`);
       const build = await invoke<CommandResult>('project_command', { path: repository, operation: 'build' });
       setOutput(build.output);
       if (build.code !== 0) {
