@@ -34,6 +34,19 @@ import { RenameDialog } from './components/modals/RenameDialog';
 import { DuplicateDialog } from './components/modals/DuplicateDialog';
 import { DeleteDialog } from './components/modals/DeleteDialog';
 import { useShortcuts } from './hooks/useShortcuts';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import {
+  getStoredRecentRepositories,
+  setStoredRecentRepositories,
+  getStoredTheme,
+  setStoredTheme,
+  getStoredAccent,
+  setStoredAccent,
+  getStoredMetadataOpen,
+  setStoredMetadataOpen,
+  getStoredWordWrap,
+  setStoredWordWrap,
+} from './lib/storage';
 import './style.css';
 
 type FileData = { text: string; hash: string };
@@ -52,7 +65,7 @@ const ACCENT_PRESETS = [
   { label: 'Cyan', value: '#50c9d9' },
 ];
 
-const startingRecent: string[] = JSON.parse(localStorage.getItem('recent-repositories') || '[]');
+const startingRecent: string[] = getStoredRecentRepositories();
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const siteAssetPath = (src: string) => {
@@ -90,30 +103,21 @@ function App() {
   const [duplicateTarget, setDuplicateTarget] = useState<Entry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null);
 
-  const [appAccent, setAppAccent] = useState(() => {
-    const stored = localStorage.getItem('blog-editor-accent');
-    return stored && /^#[0-9a-f]{6}$/i.test(stored) ? stored : DEFAULT_APP_ACCENT;
-  });
+  const [appAccent, setAppAccent] = useState(() => getStoredAccent());
   const [accentDraft, setAccentDraft] = useState(appAccent);
   const [appearanceDialog, setAppearanceDialog] = useState(false);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [sourceMode, setSourceMode] = useState(false);
   const [sidebar, setSidebar] = useState(true);
-  const [metadataOpen, setMetadataOpen] = useState(() => {
-    const stored = localStorage.getItem('blog-editor-metadata-open');
-    return stored !== null ? stored === 'true' : true;
-  });
-  const [wordWrap, setWordWrap] = useState<boolean>(() => {
-    const stored = localStorage.getItem('blog-editor-word-wrap');
-    return stored !== null ? stored === 'true' : true;
-  });
+  const [metadataOpen, setMetadataOpen] = useState(() => getStoredMetadataOpen());
+  const [wordWrap, setWordWrap] = useState<boolean>(() => getStoredWordWrap());
 
   useEffect(() => {
-    localStorage.setItem('blog-editor-metadata-open', String(metadataOpen));
+    setStoredMetadataOpen(metadataOpen);
   }, [metadataOpen]);
 
   useEffect(() => {
-    localStorage.setItem('blog-editor-word-wrap', String(wordWrap));
+    setStoredWordWrap(wordWrap);
   }, [wordWrap]);
 
   useEffect(() => {
@@ -127,10 +131,7 @@ function App() {
   const [previewAssets, setPreviewAssets] = useState<Record<string, string>>({});
   const [dropTarget, setDropTarget] = useState<'content' | 'visual' | null>(null);
 
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const stored = localStorage.getItem('purpose-theme');
-    return stored === 'dark' ? 'dark' : 'light';
-  });
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => getStoredTheme());
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
@@ -144,7 +145,7 @@ function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
-    localStorage.setItem('purpose-theme', theme);
+    setStoredTheme(theme);
   }, [theme]);
 
   useEffect(() => {
@@ -164,7 +165,7 @@ function App() {
       .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
     document.documentElement.style.setProperty('--orange-accent', appAccent);
     document.documentElement.style.setProperty('--accent-foreground', luminance > 0.179 ? '#080808' : '#f5f5f5');
-    localStorage.setItem('blog-editor-accent', appAccent);
+    setStoredAccent(appAccent);
   }, [appAccent]);
 
   useEffect(() => {
@@ -363,7 +364,7 @@ function App() {
       setSchemaIssues(issues);
       const next = [path, ...recent.filter(r => r !== path)].slice(0, 5);
       setRecent(next);
-      localStorage.setItem('recent-repositories', JSON.stringify(next));
+      setStoredRecentRepositories(next);
       await refreshGit(path);
       setEnvironment(await invoke<Environment>('environment', { path }));
       setNotice(issues.length ? issues.join(' ') : '');
@@ -1509,6 +1510,8 @@ function App() {
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );
