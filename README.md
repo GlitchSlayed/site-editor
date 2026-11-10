@@ -1,55 +1,162 @@
-# Blog Editor
+# Purpose — Technical Dispatch & Monograph Desktop Editor
 
-A local React + TypeScript frontend with a Tauri 2 desktop shell for editing Markdown and MDX in the existing Astro website. The first vertical slice handles repository selection, writing/projects discovery, metadata editing, Markdown source, a safe approximation preview, Astro validation/build, and a constrained Git publish path.
+**Purpose** (v0.2.0) is a dedicated desktop application engineered specifically for **The Technical Dispatch & Notebook**. Built with a modern **React 19 + TypeScript + Vite** frontend inside a native **Tauri 2 + Rust** desktop shell and packaged as a containerized **Flatpak** for Linux.
 
-## Current implementation status
+It gives authors an archival, distraction-free environment to draft and publish technical monographs, engineering notes, interactive MDX components, and mathematical treatises directly into their Astro content collections.
 
-- The editor is separate from the site and expects an existing Git checkout.
-- The adapter matches the current repository's Astro 7 content schema. Project art values are currently `wing`, `orbit`, and `code`; visual styles are the seven values in `src/content.config.ts`.
-- Markdown body edits preserve the original frontmatter bytes. Untouched documents save byte-for-byte; changing structured metadata rewrites only the YAML header while keeping unknown metadata and the body.
-- MDX source is not evaluated. MDX files remain editable in source mode; component-rich MDX does not render in the approximation preview.
-- Native repository, filesystem, command, and Git operations are only available in Tauri. Browser mode shows the interface and disables those operations.
-- The editor currently supports editing existing entries. Creating, duplicating, renaming, deleting/archive, asset import/relink, config.ts, and About/homepage controls are not implemented yet.
-- The visual preview is an approximation. The actual Astro server is available separately.
-- Git publish runs `npm run check`, `npm run build`, fetches upstream, stages only changed files under `src/content/writing`, `src/content/projects`, and `public`, commits, and pushes. It never runs `git add -A`.
-- The native Tauri binary and Flatpak bundle have been built, installed for the current user, and launched. The manifest packages a prebuilt binary from `src-tauri/target/flatpak-stage`; it is not yet a reproducible source-build pipeline.
-- The installed Flatpak successfully ran host Node.js/npm through `flatpak-spawn`. Portal access to the website checkout and actual Git publishing have not been exercised.
+---
 
-## Development
+## Architecture & Visual System
 
-Requirements: Node.js 24 or newer, npm, Rust, and the Linux Tauri/WebKitGTK development packages. On Fedora 44 you also need:
+```mermaid
+flowchart TD
+    subgraph UI ["Purpose Desktop Frontend"]
+        A["AppHeader (Purpose Branding & Theme Toggle)"]
+        B["ContentSidebar (Articles & Projects Library)"]
+        C["MetadataEditor (Structured YAML Frontmatter & Tag Chips)"]
+        D["FormatToolbar (MDX Snippets & Markdown Formatters)"]
+        E["DocumentOutlineDrawer (Live Headings TOC)"]
+        F["ArticlePreviewPane (Monograph Spread & MDX Cards)"]
+        G["EditorialAuditPanel (Em-Dash & Buzzword Linter)"]
+    end
 
-```bash
-sudo dnf install javascriptcoregtk4.1-devel libsoup3-devel webkit2gtk4.1-devel
+    subgraph Native ["Tauri 2 / Rust Native Core"]
+        H["IPC Bridge (flatpak-spawn / host commands)"]
+        I["Local Filesystem & Atomic Staging"]
+        J["Scoped Git Operations (Check, Diff, Commit, Push)"]
+        K["Astro Server Runner (bun/npm run check & build)"]
+    end
+
+    UI <--> Native
 ```
 
-Then:
+### Design Language & Typography
+Purpose matches the site's editorial design system:
+- **Warm Light Mode (Default)**: Archival Book Paper / Ivory Stock (`#F8F6F0` background, `#FFFFFF` surface, `#1C1B18` charcoal typography, `#DDD7C8` borders, `#B83E18` terracotta accents).
+- **Slate-Graphite Dark Mode**: Optional night edition (`#161614` background, `#1E1D1A` surface, `#EDE8DE` text, `#E25835` accent) with instant toggle (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd>).
+- **Typography**: Display serif (`Fraunces`), monograph body serif (`Newsreader`), clean sans (`Inter`), and monospace code (`IBM Plex Mono`).
 
+---
+
+## Core Capabilities
+
+### 1. Synchronized MDX Component Catalog
+Full snippet insertion, linting, and visual approximation cards for all 13 interactive site components:
+- `<EngineeringNote kind="decision|assumption|limitation|observation" title="...">`: Formal engineering callouts with kind badge and archival styling.
+- `<EquationBlock equation="..." label="..." description="..." variables={[...]}>`: LaTeX math blocks with variable dictionaries.
+- `<Measurement label="..." value={...} unit="..." uncertainty={...} method="...">`: Empirical measurements with explicit uncertainty bounds.
+- `<LinePlot>`, `<FunctionPlot>`, `<ScatterPlot>`, `<HeatmapPlot>`: High-performance scientific curve and intensity plots.
+- `<MetricGrid>`, `<MetricCard>`: KPI metric boards with Satteri delta indicators.
+- `<DataTable>`: Searchable, sortable engineering test matrices with CSV export.
+- `<NotebookCell>`, `<ParamPlayground>`, `<ParamSlider>`, `<Tooltip>`.
+
+### 2. Document Outline Drawer
+- Real-time hierarchy tree extraction of `#`, `##`, and `###` headings from the active document.
+- One-click jump-to-section navigation (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>) that synchronizes editor cursor position and scroll state.
+
+### 3. Interactive Tag Chip Editor
+- Replaces plain comma-delimited strings with interactive chips.
+- Add tags via <kbd>Enter</kbd> or comma; remove via <kbd>Backspace</kbd> or <kbd>×</kbd>.
+- Autocomplete suggestions dynamically aggregated across existing articles and projects in the repository.
+
+### 4. Editorial Integrity & Style Linter
+- **Em-Dash Prevention**: The site style strictly forbids em dashes (`—`). Purpose flags them in real time and provides a one-click automated fixer (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>).
+- **Corporate Buzzword Audit**: Identifies marketing fluff ("paradigm shift", "game-changer", "revolutionize") and suggests precise technical alternatives.
+- **Missing Import Detection**: Automatically checks MDX component usage against imports and generates the correct `@components/mdx` import statement.
+
+### 5. Technical Writing Metrics & Ergonomics
+- Live status bar displaying total word count, character count, estimated reading time (`~X min`), and real-time cursor coordinates (`Ln X, Col Y`).
+- Word wrap toggle (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd>) with horizontal scrolling support.
+- Native middle-click autoscroll on Linux and desktop environments.
+- Drag-and-drop local image insertion with automatic relative pathing into `images/`.
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+| :--- | :--- |
+| <kbd>Ctrl</kbd> + <kbd>S</kbd> | Save document to disk (preserves YAML header formatting) |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> | Toggle Light / Dark theme |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> | Toggle Document Outline drawer |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd> | Toggle Word Wrap on / off |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> | Toggle Raw Source YAML mode vs Visual Form |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> | Automatically fix all forbidden em dashes |
+| <kbd>Ctrl</kbd> + <kbd>B</kbd> | Format selection as **bold** |
+| <kbd>Ctrl</kbd> + <kbd>I</kbd> | Format selection as *italic* |
+| <kbd>Ctrl</kbd> + <kbd>K</kbd> | Insert Markdown link |
+| <kbd>?</kbd> | Open Keyboard Shortcuts modal (when not focused in text) |
+| <kbd>Middle Click</kbd> | Autoscroll view in any direction |
+| <kbd>Esc</kbd> | Dismiss any active dialog, outline drawer, or modal |
+
+---
+
+## Local Development & Testing
+
+### Prerequisites
+- Node.js 22+ & npm
+- Rust toolchain (stable)
+- Linux WebKitGTK & Tauri dependencies (Fedora: `javascriptcoregtk4.1-devel libsoup3-devel webkit2gtk4.1-devel`)
+
+### Commands
 ```bash
-npm ci                      # install site + editor dependencies
-npm run dev                 # editor dev server (desktop file ops disabled in browser)
-npm run tauri -- dev        # desktop app (full filesystem/Git access)
-npm test                    # vitest suite
-npm run build               # web frontend only (dist/)
-npx tauri build             # desktop app + bundles (deb/rpm/appimage); runs `npm run build` first
+# Install dependencies
+npm ci
+
+# Run Vitest test suite
+npm test
+
+# Start frontend development server (http://127.0.0.1:1420)
+npm run dev
+
+# Run full desktop application under Tauri
+npm run tauri:dev
+
+# Compile TypeScript and build production web frontend bundle (dist/)
+npm run build
 ```
 
-Build speed: the first `npx tauri build` compiles the WebKitGTK/Rust bindings (~1 minute). Subsequent builds reuse the `src-tauri/target/` cargo cache and are much faster. The web frontend (`npm run build`) builds independently in ~20s.
+---
 
-See [`docs/build.md`](docs/build.md) for the full build process, Flatpak rebuild steps, and how to keep builds fast.
+## Packaging & Flatpak Distribution
 
-## Browser limitations
+Purpose is packaged as a sandboxed Flatpak application (`com.glitchslayed.site-editor`) using the **GNOME 49 Platform & SDK**:
 
-A normal browser cannot open a repository folder, read/write arbitrary local files, or run npm and Git. This mode is a UI development preview only; it does not start a companion backend. Use the Tauri application for editing and publishing.
+```bash
+# 1. Compile native binary inside GNOME 49 container with rust-stable extension
+flatpak run --user --share=network \
+  --env=FLATPAK_ENABLE_SDK_EXT=rust-stable \
+  --filesystem=host --command=bash org.gnome.Sdk -c "
+    cd '$(pwd)/src-tauri'
+    export PATH='/usr/lib/sdk/rust-stable/bin:$PATH'
+    cargo build --release
+  "
 
-## Flatpak
+# 2. Stage Flatpak assets
+stage="src-tauri/target/flatpak-stage"
+mkdir -p "$stage/bin" "$stage/share/applications" "$stage/share/icons/hicolor/scalable/apps" "$stage/share/metainfo"
+install -Dm755 src-tauri/target/release/glitchys-site-editor "$stage/bin/glitchys-site-editor"
+install -Dm644 packaging/com.glitchslayed.site-editor.desktop "$stage/share/applications/com.glitchslayed.site-editor.desktop"
+install -Dm644 packaging/icons/hicolor/scalable/apps/com.glitchslayed.site-editor.svg "$stage/share/icons/hicolor/scalable/apps/com.glitchslayed.site-editor.svg"
+install -Dm644 packaging/com.glitchslayed.site-editor.metainfo.xml "$stage/share/metainfo/com.glitchslayed.site-editor.metainfo.xml"
 
-The manifest is at `packaging/com.glitchslayed.site-editor.yml`. The intended bridge is limited in application code to the fixed `git` operations and `npm run check/build/dev` calls. The Flatpak needs network access for Git and local preview, the document portal for user-selected repository access, and `org.freedesktop.Flatpak` talk permission for `flatpak-spawn --host`. `ssh-auth` is exposed to reuse an SSH agent. No blanket home filesystem access is requested.
+# 3. Build and install for current user
+flatpak run --filesystem=host org.flatpak.Builder --user --install --force-clean build-dir packaging/com.glitchslayed.site-editor.yml
 
-The bridge executes host Git/Node/npm and reads the selected checkout on the host. A user must have Git, Node 24+, npm, and the website dependencies available on the host. This is a deliberate bridge strategy, not bundled tools. The host-command permission is powerful; the Rust command surface must remain fixed and argument-array based. Do not grant a generic command endpoint. The Flatpak was built from a prebuilt Tauri binary and installed locally; its repository portal and Git workflow still need an end-to-end check.
+# 4. Create standalone bundle (.flatpak)
+flatpak run --filesystem=host org.flatpak.Builder --export-only --repo=repo build-dir packaging/com.glitchslayed.site-editor.yml
+flatpak build-bundle repo glitchys-site-editor.flatpak com.glitchslayed.site-editor master --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+```
 
-Build notes and environment expectations are in [the Flatpak guide](docs/flatpak.md).
+To run the installed application:
+```bash
+flatpak run com.glitchslayed.site-editor
+```
 
-## Site adapter
+---
 
-The adapter intentionally reads only the known `src/content.config.ts` shape rather than evaluating TypeScript configuration. See [the adapter notes](docs/site-adapter.md).
+## Continuous Integration & Releases
+
+Automated builds and GitHub Releases are handled via GitHub Actions in [`.github/workflows/flatpak-release.yml`](.github/workflows/flatpak-release.yml):
+- Every push to `main` verifies compilation, frontend bundle, and containerized Flatpak assembly.
+- Any version tag (e.g. `v0.2.0`) builds the standalone `.flatpak` bundle and publishes a GitHub Release automatically.
