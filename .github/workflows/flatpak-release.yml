@@ -12,9 +12,9 @@ on:
         type: boolean
         default: false
       tag_name:
-        description: 'Tag name for the release (e.g. v0.1.0)'
+        description: 'Tag name for the release (e.g. v0.2.0)'
         required: false
-        default: 'v0.1.0'
+        default: 'v0.2.0'
 
 permissions:
   contents: write
@@ -28,14 +28,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 22
+      - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Run frontend unit tests
+        run: npm test
 
       - name: Build frontend bundle
         run: npm run build
@@ -46,6 +49,14 @@ jobs:
           sudo apt-get install -y flatpak flatpak-builder
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak install --user -y flathub org.gnome.Platform//49 org.gnome.Sdk//49 org.freedesktop.Sdk.Extension.rust-stable//25.08
+
+      - name: Run Rust unit tests in GNOME 49 SDK
+        run: |
+          flatpak run --share=network --env=FLATPAK_ENABLE_SDK_EXT=rust-stable --filesystem=host --command=bash org.gnome.Sdk -c "
+            cd '$GITHUB_WORKSPACE/src-tauri'
+            export PATH='/usr/lib/sdk/rust-stable/bin:$PATH'
+            cargo test
+          "
 
       - name: Compile native binary in GNOME 49 SDK
         run: |

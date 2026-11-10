@@ -70,6 +70,16 @@ Full snippet insertion, linting, and visual approximation cards for all 13 inter
 - Native middle-click autoscroll on Linux and desktop environments.
 - Drag-and-drop local image insertion with automatic relative pathing into `images/`.
 
+### 6. Package Manager & Schema Synchronization
+- **Multi-Package Manager Engine**: Auto-detects Bun (`bun.lock`/`bun.lockb`), PNPM (`pnpm-lock.yaml`), Yarn (`yarn.lock`), or npm (`package-lock.json`), executing isolated commands (`<pm> run check`, `<pm> run build`, `<pm> install`, `<pm> run dev`) with streaming log output and process group cancellation.
+- **Dynamic Content Schema**: Real AST extraction of `src/content.config.ts` synchronizing `PROJECT_STATUSES` (including `Released`), `PROJECT_DRAWINGS`, `art`, `visuals`, and `engineering` specifications across TypeScript and Rust.
+- **Data Safety Guarantees**:
+  - **Draft Autosave Recovery**: Persists dirty editor buffers every 2 seconds, offering recovery upon reopening.
+  - **Conflict Resolution Modal**: Detects external modifications on disk before saves with side-by-side diff comparison, reload, or overwrite options.
+  - **Window Close Guard**: Prevents accidental exit with unsaved modifications.
+  - **Safe Deletion**: Routes deletions through the OS trash via `trash` crate rather than unrecoverable unlinking.
+
+
 ---
 
 ## Keyboard Shortcuts

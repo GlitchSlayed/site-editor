@@ -1,6 +1,7 @@
 # Flatpak packaging notes
 
-The package uses a host-command bridge because arbitrary Astro repositories can require different Node/npm versions and Git authentication setups. Git and npm are not assumed to exist in the Flatpak runtime. The Tauri backend invokes only fixed Git operations and `npm run check`, `npm run build`, or `npm run dev`, using structured argument vectors and a controlled selected-repository working directory. It does not expose a generic shell endpoint.
+The package uses a host-command bridge because arbitrary Astro repositories can require different package managers (Bun, PNPM, Yarn, npm), Node versions, and Git authentication setups. Git and package managers are not assumed to exist in the Flatpak runtime. The Tauri backend invokes only fixed Git operations and package manager commands (`<pm> run check`, `<pm> run build`, `<pm> install`, or `<pm> run dev`), using structured argument vectors and a controlled selected-repository working directory. It does not expose a generic shell endpoint.
+
 
 The manifest requests Wayland/fallback X11, GPU access, networking, the Flatpak session service needed by `flatpak-spawn --host`, and the SSH agent socket. It does not request full home access. The native directory picker is intended to use the desktop portal to grant access to the selected checkout. Git credential helpers remain on the host. A successful push is reported separately from Pages deployment.
 
