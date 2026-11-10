@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertCircle, Trash2 } from 'lucide-react';
-import { Entry } from '../sidebar/ContentSidebar';
+import type { Entry } from '../sidebar/ContentSidebar';
 
 interface DeleteDialogProps {
   entry: Entry;
@@ -27,7 +27,7 @@ export const DeleteDialog: React.FC<DeleteDialogProps> = ({
         </div>
 
         <p className="modal-copy">
-          Are you sure you want to permanently delete <strong>{entry.title}</strong>?
+          Are you sure you want to delete <strong>{entry.title}</strong>? This document will be moved to your system trash.
         </p>
 
         <div className="delete-warning-box">
@@ -52,7 +52,7 @@ export const DeleteDialog: React.FC<DeleteDialogProps> = ({
             onClick={onConfirm}
             disabled={busy}
           >
-            <Trash2 size={14} /> {busy ? 'Deleting…' : 'Delete permanently'}
+            <Trash2 size={14} /> {busy ? 'Moving…' : 'Move to trash'}
           </button>
         </div>
       </section>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { slugify } from '@/lib/site-adapter';
-import { Entry } from '../sidebar/ContentSidebar';
+import type { Entry } from '../sidebar/ContentSidebar';
 
 interface DuplicateDialogProps {
   entry: Entry;
