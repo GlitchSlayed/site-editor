@@ -1,6 +1,13 @@
 import React, { useState, useRef } from 'react';
 import { ChevronDown, AlertCircle, Upload, X, Tag } from 'lucide-react';
-import { SiteMetadata, PROJECT_STATUSES, PROJECT_ART, PROJECT_VISUALS, SITE_ACCENT_PRESETS } from '@/lib/site-adapter';
+import {
+  type SiteMetadata,
+  PROJECT_STATUSES,
+  PROJECT_ART,
+  PROJECT_DRAWINGS,
+  PROJECT_VISUALS,
+  SITE_ACCENT_PRESETS,
+} from '@/lib/site-adapter';
 import { Entry } from '../sidebar/ContentSidebar';
 
 interface MetadataEditorProps {
@@ -246,6 +253,111 @@ export const MetadataEditor: React.FC<MetadataEditorProps> = ({
                     ))}
                   </select>
                 </label>
+
+                <label className="field">
+                  <span>Drawing Blueprint</span>
+                  <select
+                    value={String(metadata.drawing || '')}
+                    onChange={e => onFieldChange('drawing', e.target.value || undefined)}
+                  >
+                    <option value="">None / Default</option>
+                    {PROJECT_DRAWINGS.map(d => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="engineering-section" style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '10px 12px', marginTop: 10, background: 'var(--surface-2)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 650, letterSpacing: '0.02em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    Engineering Specification
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-outline button-sm"
+                    style={{ height: 22, padding: '0 8px', fontSize: 10 }}
+                    onClick={() => {
+                      if (metadata.engineering) {
+                        onFieldChange('engineering', undefined);
+                      } else {
+                        onFieldChange('engineering', {
+                          question: '',
+                          approach: '',
+                          constraint: '',
+                          evidence: '',
+                          nextCheck: '',
+                          methods: [],
+                        });
+                      }
+                    }}
+                  >
+                    {metadata.engineering ? 'Remove Engineering Spec' : '+ Add Engineering Spec'}
+                  </button>
+                </div>
+
+                {Boolean(metadata.engineering) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <label className="field">
+                      <span>Engineering Question</span>
+                      <input
+                        value={String(metadata.engineering?.question || '')}
+                        onChange={e => onFieldChange('engineering', { ...(metadata.engineering || {}), question: e.target.value })}
+                        placeholder="Core hypothesis or feasibility question..."
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Approach</span>
+                      <input
+                        value={String(metadata.engineering?.approach || '')}
+                        onChange={e => onFieldChange('engineering', { ...(metadata.engineering || {}), approach: e.target.value })}
+                        placeholder="Methodology and design choices..."
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Key Constraint</span>
+                      <input
+                        value={String(metadata.engineering?.constraint || '')}
+                        onChange={e => onFieldChange('engineering', { ...(metadata.engineering || {}), constraint: e.target.value })}
+                        placeholder="Primary physical/architectural constraints..."
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Evidence</span>
+                      <input
+                        value={String(metadata.engineering?.evidence || '')}
+                        onChange={e => onFieldChange('engineering', { ...(metadata.engineering || {}), evidence: e.target.value })}
+                        placeholder="Empirical data, test results, benchmarks..."
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Next Check</span>
+                      <input
+                        value={String(metadata.engineering?.nextCheck || '')}
+                        onChange={e => onFieldChange('engineering', { ...(metadata.engineering || {}), nextCheck: e.target.value })}
+                        placeholder="Upcoming milestone or verification test..."
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Methods (comma-separated)</span>
+                      <input
+                        value={Array.isArray(metadata.engineering?.methods) ? metadata.engineering.methods.join(', ') : ''}
+                        onChange={e =>
+                          onFieldChange('engineering', {
+                            ...(metadata.engineering || {}),
+                            methods: e.target.value
+                              .split(',')
+                              .map(m => m.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                        placeholder="e.g. OpenVSP, dracut, QEMU UEFI"
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div className="field-grid">

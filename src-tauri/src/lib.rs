@@ -173,7 +173,122 @@ fn image_mime(path:&Path)->Result<&'static str,String>{match path.extension().an
 }
 #[tauri::command] fn run_dev_server(path:String,state:State<Server>)->Result<String,String>{let root=repo(&path)?;let mut slot=state.0.lock().map_err(fail)?;if slot.as_mut().is_some_and(|c|c.try_wait().ok().flatten().is_none()){return Ok("Server is already running.".into())}let mut cmd=command(&root,"npm")?;let mut child=cmd.args(["run","dev","--","--host","127.0.0.1","--port","4321","--strictPort"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(fail)?;let address:SocketAddr="127.0.0.1:4321".parse().unwrap();let mut ready=false;for _ in 0..30{if child.try_wait().map_err(fail)?.is_some(){break}if TcpStream::connect_timeout(&address,Duration::from_millis(100)).is_ok(){ready=true;break}thread::sleep(Duration::from_millis(100));}if !ready{let _=child.kill();let _=child.wait();return Err("Astro did not start on port 4321. Check that Node.js/npm and the site's dependencies are installed, and that the port is free.".into())}*slot=Some(child);Ok("Astro is running at http://127.0.0.1:4321".into())}
 #[tauri::command] fn stop_dev_server(state:State<Server>)->Result<String,String>{let mut slot=state.0.lock().map_err(fail)?;if let Some(mut c)=slot.take(){let _=c.kill();let _=c.wait();}Ok("Astro server stopped.".into())}
-#[tauri::command] fn validate_repo(path:String)->Result<Vec<String>,String>{let root=repo(&path)?;let mut issues=Vec::new();let schema=fs::read_to_string(root.join("src/content.config.ts")).map_err(fail)?;for field in ["title","description","date","tags","draft","sample","featured","status","art","visual","visualAccent","visualImage","visualImageAlt","visualLabel","visualAnimate"]{if !schema.contains(field){issues.push(format!("The current site schema does not declare the editor's expected {field} metadata field. Saving is disabled until the adapter is updated."))}}for art in ["wing","orbit","code"]{if !schema.contains(art){issues.push(format!("The current site schema does not contain expected project artwork value '{art}'."))}}for visual in ["dither","grain","mesh","grid","dots","asset","screenshot"]{if !schema.contains(visual){issues.push(format!("The current site schema does not contain expected project visual value '{visual}'."))}}Ok(issues)}
+#[derive(Debug, PartialEq, Eq)]
+pub struct ExtractedSchema {
+    pub project_statuses: Vec<String>,
+    pub project_art: Vec<String>,
+    pub project_drawings: Vec<String>,
+    pub project_visuals: Vec<String>,
+    pub common_fields: Vec<String>,
+    pub project_fields: Vec<String>,
+}
+
+pub fn extract_schema_from_content_config(source: &str) -> Result<ExtractedSchema, String> {
+    if source.trim().is_empty() {
+        return Err("Failed to parse site content schema: src/content.config.ts is empty.".to_string());
+    }
+
+    let extract_enum = |pattern: &regex::Regex, name: &str| -> Result<Vec<String>, String> {
+        let caps = pattern.captures(source).ok_or_else(|| {
+            format!("Failed to parse site schema from src/content.config.ts: missing {name} z.enum declaration.")
+        })?;
+        let inner = caps.get(1).or_else(|| caps.get(2)).map(|m| m.as_str()).unwrap_or("");
+        let item_re = regex::Regex::new(r#"['"]([^'"]+)['"]"#).map_err(|e| e.to_string())?;
+        let items: Vec<String> = item_re.captures_iter(inner).map(|c| c[1].to_string()).collect();
+        if items.is_empty() {
+            return Err(format!("Failed to parse site schema from src/content.config.ts: {name} enum is empty."));
+        }
+        Ok(items)
+    };
+
+    let status_re = regex::Regex::new(r#"(?:ProjectStatus\s*=\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)|status\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\))"#).map_err(|e| e.to_string())?;
+    let art_re = regex::Regex::new(r#"art\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)"#).map_err(|e| e.to_string())?;
+    let drawing_re = regex::Regex::new(r#"drawing\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)"#).map_err(|e| e.to_string())?;
+    let visual_re = regex::Regex::new(r#"visual\s*:\s*z\.enum\(\s*\[([\s\S]*?)\]\s*\)"#).map_err(|e| e.to_string())?;
+
+    let project_statuses = extract_enum(&status_re, "ProjectStatus")?;
+    let project_art = extract_enum(&art_re, "art")?;
+    let project_drawings = extract_enum(&drawing_re, "drawing")?;
+    let project_visuals = extract_enum(&visual_re, "visual")?;
+
+    let common_re = regex::Regex::new(r#"const\s+common\s*=\s*\{([\s\S]*?)\};"#).map_err(|e| e.to_string())?;
+    let common_caps = common_re.captures(source).ok_or_else(|| {
+        "Failed to parse site schema from src/content.config.ts: missing common fields declaration.".to_string()
+    })?;
+    let field_re = regex::Regex::new(r#"(\w+)\s*:\s*z\."#).map_err(|e| e.to_string())?;
+    let common_fields: Vec<String> = field_re.captures_iter(&common_caps[1]).map(|c| c[1].to_string()).collect();
+
+    let project_re = regex::Regex::new(r#"projects\s*:\s*defineCollection\(\{[\s\S]*?schema\s*:\s*z\.object\(\{([\s\S]*?)\}\s*\)\s*\}\)"#).map_err(|e| e.to_string())?;
+    let project_caps = project_re.captures(source).ok_or_else(|| {
+        "Failed to parse site schema from src/content.config.ts: missing projects collection schema.".to_string()
+    })?;
+    let proj_field_re = regex::Regex::new(r#"(\w+)\s*:\s*(?:z\.|ProjectStatus)"#).map_err(|e| e.to_string())?;
+    let project_fields: Vec<String> = proj_field_re.captures_iter(&project_caps[1]).map(|c| c[1].to_string()).collect();
+
+    Ok(ExtractedSchema {
+        project_statuses,
+        project_art,
+        project_drawings,
+        project_visuals,
+        common_fields,
+        project_fields,
+    })
+}
+
+pub fn validate_repo_schema(extracted: &ExtractedSchema) -> Vec<String> {
+    let mut issues = Vec::new();
+    let required_common = ["title", "description", "date", "tags", "draft", "sample", "featured"];
+    for field in required_common {
+        if !extracted.common_fields.iter().any(|f| f == field) {
+            issues.push(format!("The site schema does not declare expected common field '{field}'."));
+        }
+    }
+
+    let required_projects = ["status", "art", "drawing", "engineering", "visual", "visualAccent", "visualImage", "visualImageAlt", "visualLabel", "visualAnimate"];
+    for field in required_projects {
+        if !extracted.project_fields.iter().any(|f| f == field) {
+            issues.push(format!("The site schema does not declare expected project field '{field}'."));
+        }
+    }
+
+    for status in ["Concept", "In Development", "Prototype", "Completed", "Released"] {
+        if !extracted.project_statuses.iter().any(|s| s == status) {
+            issues.push(format!("The site schema does not contain expected project status '{status}'."));
+        }
+    }
+
+    for art in ["wing", "orbit", "code"] {
+        if !extracted.project_art.iter().any(|a| a == art) {
+            issues.push(format!("The site schema does not contain expected project art '{art}'."));
+        }
+    }
+
+    for visual in ["dither", "grain", "mesh", "grid", "dots", "asset", "screenshot"] {
+        if !extracted.project_visuals.iter().any(|v| v == visual) {
+            issues.push(format!("The site schema does not contain expected project visual '{visual}'."));
+        }
+    }
+
+    for drawing in ["airfoils", "bwb", "uki", "gofr", "rocket", "wing", "orbit", "code"] {
+        if !extracted.project_drawings.iter().any(|d| d == drawing) {
+            issues.push(format!("The site schema does not contain expected project drawing '{drawing}'."));
+        }
+    }
+
+    issues
+}
+
+#[tauri::command]
+fn validate_repo(path: String) -> Result<Vec<String>, String> {
+    let root = repo(&path)?;
+    let schema_path = root.join("src/content.config.ts");
+    if !schema_path.exists() {
+        return Err("Repository is missing src/content.config.ts".to_string());
+    }
+    let schema_text = fs::read_to_string(&schema_path).map_err(fail)?;
+    let extracted = extract_schema_from_content_config(&schema_text)?;
+    Ok(validate_repo_schema(&extracted))
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)] pub fn run(){tauri::Builder::default().manage(Server(Mutex::new(None))).plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init()).invoke_handler(tauri::generate_handler![list_content,create_article,rename_article,delete_article,duplicate_article,read_article,save_article,import_site_image,read_site_image,project_command,environment,git_info,publish,run_dev_server,stop_dev_server,validate_repo]).run(tauri::generate_context!()).expect("error while running Tauri application");}
 
 #[cfg(test)] mod tests {
@@ -181,4 +296,20 @@ fn image_mime(path:&Path)->Result<&'static str,String>{match path.extension().an
  #[test] fn git_ahead_behind_counts_are_parsed_in_order(){assert_eq!(parse_counts("3\t2\n"),(3,2));assert_eq!(parse_counts("bad 4"),(0,4));assert_eq!(parse_counts(""),(0,0));}
  #[test] fn publish_allowlist_excludes_site_code_and_non_asset_public_files(){assert!(publishable_path("src/content/writing/story.mdx"));assert!(publishable_path("public/images/rocket.webp"));assert!(!publishable_path("src/pages/index.astro"));assert!(!publishable_path("public/.env"));assert!(!publishable_path("public/scripts/app.js"));}
  #[test] fn repository_file_paths_cannot_escape_or_follow_outside_symlinks(){let dir=std::env::temp_dir().join(format!("site-editor-path-test-{}",std::process::id()));let outside=dir.with_extension("outside");let _=fs::remove_dir_all(&dir);let _=fs::remove_file(&outside);fs::create_dir_all(&dir).unwrap();fs::write(dir.join("entry.md"),"safe").unwrap();fs::write(&outside,"outside").unwrap();#[cfg(unix)] std::os::unix::fs::symlink(&outside,dir.join("escape.md")).unwrap();assert!(safe_file(&dir,"entry.md").is_ok());assert!(safe_file(&dir,"../outside").is_err());#[cfg(unix)] assert!(safe_file(&dir,"escape.md").is_err());let _=fs::remove_dir_all(&dir);let _=fs::remove_file(&outside);}
+ #[test] fn schema_extraction_from_real_fixture_matches_all_rules() {
+  let fixture = include_str!("../../tests/fixtures/content.config.ts");
+  let extracted = extract_schema_from_content_config(fixture).expect("schema extraction failed");
+  assert!(extracted.project_statuses.contains(&"Released".to_string()));
+  assert!(extracted.project_drawings.contains(&"airfoils".to_string()));
+  assert!(extracted.project_art.contains(&"wing".to_string()));
+  assert!(extracted.project_visuals.contains(&"mesh".to_string()));
+  assert!(extracted.common_fields.contains(&"title".to_string()));
+  assert!(extracted.project_fields.contains(&"engineering".to_string()));
+  let issues = validate_repo_schema(&extracted);
+  assert!(issues.is_empty(), "Validation issues found: {:?}", issues);
+ }
+ #[test] fn schema_extraction_fails_loudly_on_malformed_input() {
+  assert!(extract_schema_from_content_config("").is_err());
+  assert!(extract_schema_from_content_config("const x = 1;").is_err());
+ }
 }
