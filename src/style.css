@@ -874,21 +874,29 @@ body.autoscrolling *{
 }
 
 /* Satteri Percentage Badges */
+.satteri-percent-badge,
 .delta-badge {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 2px;
+  border-radius: 4px;
   display: inline-block;
+  line-height: 1.3;
 }
+.satteri-percent-positive,
 .delta-pos {
   color: #2e7d32;
   background: rgba(46, 125, 50, 0.12);
 }
+.satteri-percent-negative,
 .delta-neg {
   color: #c62828;
   background: rgba(198, 40, 40, 0.12);
+}
+.satteri-percent-neutral {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.12);
 }
 
 /* MDX Component Visual Previews */

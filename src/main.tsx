@@ -33,6 +33,7 @@ import { KeyboardShortcutsDialog } from './components/modals/KeyboardShortcutsDi
 import { RenameDialog } from './components/modals/RenameDialog';
 import { DuplicateDialog } from './components/modals/DuplicateDialog';
 import { DeleteDialog } from './components/modals/DeleteDialog';
+import { preProcessMarkdown, transformTablePercentBadges } from './lib/preview-transformer';
 import { useShortcuts } from './hooks/useShortcuts';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import {
@@ -66,8 +67,6 @@ const ACCENT_PRESETS = [
 ];
 
 const startingRecent: string[] = getStoredRecentRepositories();
-const escapeHtml = (s: string) =>
-  s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const siteAssetPath = (src: string) => {
   const match = src.replace(/\\/g, '/').match(/(?:^|\/)(images\/[^?#)\s]+)/);
   return match?.[1];
@@ -298,51 +297,10 @@ function App() {
   };
 
   const rendered = useMemo(() => {
-    let markdown = body;
-
-    // Satteri percentage annotations in tables / text: (+12.4%), (-3.2%)
-    markdown = markdown.replace(
-      /\(\+([0-9.]+%?)\)/g,
-      '<span class="delta-badge delta-pos">(+$1)</span>'
-    );
-    markdown = markdown.replace(
-      /\(-([0-9.]+%?)\)/g,
-      '<span class="delta-badge delta-neg">(-$1)</span>'
-    );
-
-    // Math preview blocks
-    markdown = markdown.replace(
-      /\$\$([\s\S]*?)\$\$/g,
-      (_m, eq: string) => `<div class="mdx-equation-preview"><div class="mdx-equation-math">${escapeHtml(eq)}</div></div>`
-    );
-    markdown = markdown.replace(
-      /\$([^$\n]+)\$/g,
-      (_m, eq: string) => `<code class="math-inline">${escapeHtml(eq)}</code>`
-    );
-
-    // EngineeringNote visual cards
-    markdown = markdown.replace(
-      /<EngineeringNote\s+kind="([^"]*)"(?:\s+title="([^"]*)")?>([\s\S]*?)<\/EngineeringNote>/g,
-      (_m, kind: string, title: string, content: string) =>
-        `<aside class="mdx-note-preview mdx-note-${escapeHtml(kind)}"><div class="mdx-note-kicker">${escapeHtml(kind)}</div>${title ? `<h4>${escapeHtml(title)}</h4>` : ''}<div>${content}</div></aside>`
-    );
-
-    // EquationBlock visual cards
-    markdown = markdown.replace(
-      /<EquationBlock[\s\S]*?equation="([^"]*)"[\s\S]*?description="([^"]*)"[\s\S]*?\/>/g,
-      (_m, eq: string, desc: string) =>
-        `<div class="mdx-equation-preview"><div class="mdx-equation-math">${escapeHtml(eq)}</div><div class="mdx-equation-desc">${escapeHtml(desc)}</div></div>`
-    );
-
-    // Measurement visual cards
-    markdown = markdown.replace(
-      /<Measurement[\s\S]*?label="([^"]*)"[\s\S]*?value=\{?([0-9.]+)\}?[\s\S]*?unit="([^"]*)"[\s\S]*?\/>/g,
-      (_m, label: string, value: string, unit: string) =>
-        `<div class="mdx-measurement-preview"><span class="mdx-measurement-lbl">${escapeHtml(label)}</span><span class="mdx-measurement-val">${escapeHtml(value)} ${escapeHtml(unit)}</span></div>`
-    );
-
-    const html = marked.parse(markdown, { async: false }) as string;
-    const withAssets = html.replace(/src="([^"]+)"/g, (_all, src: string) => {
+    const preprocessed = preProcessMarkdown(body);
+    const rawHtml = marked.parse(preprocessed, { async: false }) as string;
+    const transformedHtml = transformTablePercentBadges(rawHtml);
+    const withAssets = transformedHtml.replace(/src="([^"]+)"/g, (_all, src: string) => {
       const asset = siteAssetPath(src);
       return `src="${asset && previewAssets[asset] ? previewAssets[asset] : src}"`;
     });
