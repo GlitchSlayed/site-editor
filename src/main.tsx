@@ -1,41 +1,24 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import {
-  FileText,
-  Save,
-  Eye,
-  Code2,
-  Play,
-  Square,
-  Check,
-  Hammer,
-  Send,
-  ChevronDown,
-  ExternalLink,
-  Plus,
-} from 'lucide-react';
+import { FileText } from 'lucide-react';
 import { parseSiteDocument, replaceMarkdownBody, serializeSiteDocument, validateMetadata, type SiteMetadata } from './lib/site-adapter';
 import { auditEditorialText, fixAllEmDashes, type EditorialIssue } from './lib/editorial-rules';
 import { initMiddleClickAutoscroll } from './lib/autoscroll';
-import { AppHeader } from './components/layout/AppHeader';
-import { ContentSidebar, type Entry, type Environment } from './components/sidebar/ContentSidebar';
-import { MetadataEditor } from './components/editor/MetadataEditor';
-import { FormatToolbar } from './components/editor/FormatToolbar';
-import { EditorialAuditPanel } from './components/editor/EditorialAuditPanel';
-import { ArticlePreviewPane } from './components/preview/ArticlePreviewPane';
-import { DocumentOutlineDrawer, type HeadingItem } from './components/outline/DocumentOutlineDrawer';
-import { KeyboardShortcutsDialog } from './components/modals/KeyboardShortcutsDialog';
-import { RenameDialog } from './components/modals/RenameDialog';
-import { DuplicateDialog } from './components/modals/DuplicateDialog';
-import { DeleteDialog } from './components/modals/DeleteDialog';
 import { preProcessMarkdown, transformTablePercentBadges } from './lib/preview-transformer';
 import { useShortcuts } from './hooks/useShortcuts';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import {
+  saveDraftRecovery,
+  getDraftRecovery,
+  clearDraftRecovery,
+  type DraftRecoveryEntry,
+} from './lib/draft-recovery';
 import {
   getStoredRecentRepositories,
   setStoredRecentRepositories,
@@ -48,6 +31,29 @@ import {
   getStoredWordWrap,
   setStoredWordWrap,
 } from './lib/storage';
+
+// Modular Components
+import { AppHeader } from './components/layout/AppHeader';
+import { ContentSidebar, type Entry, type Environment } from './components/sidebar/ContentSidebar';
+import { EditorToolbar } from './components/editor/EditorToolbar';
+import { MetadataEditor } from './components/editor/MetadataEditor';
+import { MarkdownEditor } from './components/editor/MarkdownEditor';
+import { ArticlePreviewPane } from './components/preview/ArticlePreviewPane';
+import { DocumentOutlineDrawer, type HeadingItem } from './components/outline/DocumentOutlineDrawer';
+import { StatusBar } from './components/statusbar/StatusBar';
+import { OutputPanel } from './components/terminal/OutputPanel';
+
+// Modals
+import { KeyboardShortcutsDialog } from './components/modals/KeyboardShortcutsDialog';
+import { RenameDialog } from './components/modals/RenameDialog';
+import { DuplicateDialog } from './components/modals/DuplicateDialog';
+import { DeleteDialog } from './components/modals/DeleteDialog';
+import { AppearanceDialog } from './components/modals/AppearanceDialog';
+import { NewDocumentDialog } from './components/modals/NewDocumentDialog';
+import { PublishDialog } from './components/modals/PublishDialog';
+import { ConflictDialog } from './components/modals/ConflictDialog';
+import { CloseConfirmDialog } from './components/modals/CloseConfirmDialog';
+
 import './style.css';
 
 type FileData = { text: string; hash: string };
@@ -104,6 +110,7 @@ function App() {
   const [duplicateTarget, setDuplicateTarget] = useState<Entry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null);
 
+  // Appearance & UI layout states
   const [appAccent, setAppAccent] = useState(() => getStoredAccent());
   const [accentDraft, setAccentDraft] = useState(appAccent);
   const [appearanceDialog, setAppearanceDialog] = useState(false);
@@ -112,6 +119,28 @@ function App() {
   const [sidebar, setSidebar] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(() => getStoredMetadataOpen());
   const [wordWrap, setWordWrap] = useState<boolean>(() => getStoredWordWrap());
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => getStoredTheme());
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+
+  // Phase 2 & 3: Dev server status, streaming output, conflict modal, close guard, draft recovery
+  const [devServerRunning, setDevServerRunning] = useState(false);
+  const [conflictData, setConflictData] = useState<{ localText: string; diskText: string } | null>(null);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [recoveredDraft, setRecoveredDraft] = useState<DraftRecoveryEntry | null>(null);
+  const closeConfirmedRef = useRef(false);
+
+  const bodyEditor = useRef<HTMLTextAreaElement>(null);
+  const sourceEditor = useRef<HTMLTextAreaElement>(null);
+  const workarea = useRef<HTMLDivElement>(null);
+  const [previewWidth, setPreviewWidth] = useState(440);
+  const [previewAssets, setPreviewAssets] = useState<Record<string, string>>({});
+  const [dropTarget, setDropTarget] = useState<'content' | 'visual' | null>(null);
+
+  const dirty = Boolean(selected) && (source !== savedSource || JSON.stringify(metadata) !== savedMetadata);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
 
   useEffect(() => {
     setStoredMetadataOpen(metadataOpen);
@@ -124,20 +153,6 @@ function App() {
   useEffect(() => {
     return initMiddleClickAutoscroll();
   }, []);
-
-  const bodyEditor = useRef<HTMLTextAreaElement>(null);
-  const sourceEditor = useRef<HTMLTextAreaElement>(null);
-  const workarea = useRef<HTMLDivElement>(null);
-  const [previewWidth, setPreviewWidth] = useState(440);
-  const [previewAssets, setPreviewAssets] = useState<Record<string, string>>({});
-  const [dropTarget, setDropTarget] = useState<'content' | 'visual' | null>(null);
-
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => getStoredTheme());
-  const [outlineOpen, setOutlineOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-
-  const dirty = Boolean(selected) && (source !== savedSource || JSON.stringify(metadata) !== savedMetadata);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -156,7 +171,7 @@ function App() {
     if (native) {
       getCurrentWindow().setTitle(titleStr).catch(() => {});
     }
-  }, [selected?.title, metadata.title, dirty, native]);
+  }, [selected?.title, metadata.title, dirty]);
 
   useEffect(() => {
     const hex = appAccent.slice(1);
@@ -173,6 +188,51 @@ function App() {
     if (repository && native) refreshRepository(repository);
   }, []);
 
+  // Window close interception
+  useEffect(() => {
+    if (!native) return;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .onCloseRequested(async event => {
+        if (closeConfirmedRef.current) return;
+        if (dirtyRef.current) {
+          event.preventDefault();
+          setCloseConfirmOpen(true);
+        }
+      })
+      .then(stop => {
+        unlisten = stop;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Listen to live command output and dev server logs
+  useEffect(() => {
+    if (!native) return;
+    let unlistenCmd: (() => void) | undefined;
+    let unlistenDev: (() => void) | undefined;
+
+    void listen<string>('command-output-line', event => {
+      setOutput(prev => (prev ? `${prev}\n${event.payload}` : event.payload));
+    }).then(stop => {
+      unlistenCmd = stop;
+    });
+
+    void listen<string>('dev-server-log', event => {
+      setOutput(prev => (prev ? `${prev}\n${event.payload}` : event.payload));
+    }).then(stop => {
+      unlistenDev = stop;
+    });
+
+    return () => {
+      unlistenCmd?.();
+      unlistenDev?.();
+    };
+  }, []);
+
+  // Drag-and-drop listener for images
   const storeImageRef = useRef(storeImage);
   storeImageRef.current = storeImage;
 
@@ -209,7 +269,16 @@ function App() {
       unlisten?.();
       setDropTarget(null);
     };
-  }, [native, repository, selected?.path]);
+  }, [repository, selected?.path]);
+
+  // Periodic draft autosave recovery
+  useEffect(() => {
+    if (!repository || !selected || !dirty) return;
+    const timer = setTimeout(() => {
+      saveDraftRecovery(repository, selected.path, hash, source);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [repository, selected?.path, source, hash, dirty]);
 
   const parsed = useMemo(() => {
     try {
@@ -234,7 +303,7 @@ function App() {
         .then(data => setPreviewAssets(current => ({ ...current, [asset]: data })))
         .catch(() => {});
     }
-  }, [native, repository, source, metadata.visualImage, previewAssets]);
+  }, [repository, source, metadata.visualImage, previewAssets]);
 
   const headings = useMemo<HeadingItem[]>(() => {
     if (!body) return [];
@@ -296,8 +365,10 @@ function App() {
     setCursorPos({ line, col });
   };
 
+  const deferredBody = useDeferredValue(body);
+
   const rendered = useMemo(() => {
-    const preprocessed = preProcessMarkdown(body);
+    const preprocessed = preProcessMarkdown(deferredBody);
     const rawHtml = marked.parse(preprocessed, { async: false }) as string;
     const transformedHtml = transformTablePercentBadges(rawHtml);
     const withAssets = transformedHtml.replace(/src="([^"]+)"/g, (_all, src: string) => {
@@ -305,15 +376,15 @@ function App() {
       return `src="${asset && previewAssets[asset] ? previewAssets[asset] : src}"`;
     });
     return DOMPurify.sanitize(withAssets, { ADD_TAGS: ['aside'], ADD_ATTR: ['class'] });
-  }, [body, previewAssets]);
+  }, [deferredBody, previewAssets]);
 
   const validation = useMemo(() => {
     return selected ? validateMetadata(selected.kind.toLowerCase() as 'writing' | 'projects', metadata) : [];
   }, [selected, metadata]);
 
   const editorialIssues: EditorialIssue[] = useMemo(() => {
-    return auditEditorialText(body, isMdx);
-  }, [body, isMdx]);
+    return auditEditorialText(deferredBody, isMdx);
+  }, [deferredBody, isMdx]);
 
   async function refreshRepository(path: string) {
     try {
@@ -355,8 +426,8 @@ function App() {
     }
   }
 
-  async function selectEntry(item: Entry) {
-    if (dirty && !window.confirm('Discard your unsaved edits and open another file?')) return;
+  async function selectEntry(item: Entry, force = false) {
+    if (!force && dirty && !window.confirm('Discard your unsaved edits and open another file?')) return;
     try {
       const file = await invoke<FileData>('read_article', { path: repository, file: item.path });
       const doc = parseSiteDocument(file.text);
@@ -368,6 +439,13 @@ function App() {
       setHash(file.hash);
       setMode('edit');
       setNotice('');
+
+      const recovery = getDraftRecovery(repository, item.path, file.hash);
+      if (recovery && recovery.source !== file.text) {
+        setRecoveredDraft(recovery);
+      } else {
+        setRecoveredDraft(null);
+      }
     } catch (e) {
       setNotice(String(e));
     }
@@ -479,7 +557,7 @@ function App() {
         setSavedSource('');
         setMetadata({});
       }
-      setNotice('Document deleted.');
+      setNotice('Document moved to trash.');
     } catch (e) {
       setNotice(`Delete failed: ${String(e)}`);
     } finally {
@@ -496,14 +574,14 @@ function App() {
     if (/^#[0-9a-f]{6}$/i.test(value)) setAppAccent(value);
   }
 
-  async function save() {
+  async function save(): Promise<boolean> {
     if (!native || !selected) return false;
     if (schemaIssues.length) {
       setNotice(schemaIssues.join(' '));
       return false;
     }
+    const outputText = serializeSiteDocument(source, metadata, body);
     try {
-      const outputText = serializeSiteDocument(source, metadata, body);
       const newHash = await invoke<string>('save_article', {
         path: repository,
         file: selected.path,
@@ -514,14 +592,63 @@ function App() {
       setSavedSource(outputText);
       setHash(newHash);
       setSavedMetadata(JSON.stringify(metadata));
+      clearDraftRecovery(repository, selected.path);
       setNotice('Saved locally. Markdown body and unrecognized metadata are preserved.');
-      setEntries(await invoke<Entry[]>('list_content', { path: repository }));
-      await refreshGit();
-    } catch (e) {
-      setNotice(String(e));
+
+      const [list] = await Promise.all([
+        invoke<Entry[]>('list_content', { path: repository }),
+        refreshGit(),
+      ]);
+      setEntries(list);
+    } catch (e: unknown) {
+      const errMsg = String(e);
+      if (errMsg.includes('changed outside the editor')) {
+        try {
+          const disk = await invoke<FileData>('read_article', { path: repository, file: selected.path });
+          setConflictData({
+            localText: outputText,
+            diskText: disk.text,
+          });
+        } catch {
+          setNotice(errMsg);
+        }
+        return false;
+      }
+      setNotice(errMsg);
       return false;
     }
     return true;
+  }
+
+  async function handleOverwriteDisk() {
+    if (!selected || !repository) return;
+    try {
+      setBusy(true);
+      const disk = await invoke<FileData>('read_article', { path: repository, file: selected.path });
+      const outputText = serializeSiteDocument(source, metadata, body);
+      const newHash = await invoke<string>('save_article', {
+        path: repository,
+        file: selected.path,
+        text: outputText,
+        expectedHash: disk.hash,
+      });
+      setSource(outputText);
+      setSavedSource(outputText);
+      setHash(newHash);
+      setSavedMetadata(JSON.stringify(metadata));
+      clearDraftRecovery(repository, selected.path);
+      setConflictData(null);
+      setNotice('File overwritten successfully.');
+      const [list] = await Promise.all([
+        invoke<Entry[]>('list_content', { path: repository }),
+        refreshGit(),
+      ]);
+      setEntries(list);
+    } catch (e) {
+      setNotice(`Overwrite failed: ${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   useShortcuts({
@@ -604,7 +731,6 @@ function App() {
       let selStart = editor.selectionStart ?? currentSource.length;
       let selEnd = editor.selectionEnd ?? selStart;
 
-      // Check if importStatement is already present in source
       if (importStatement && !currentSource.includes(importStatement)) {
         const fmMatch = currentSource.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?/);
         if (fmMatch) {
@@ -616,7 +742,6 @@ function App() {
             selStart += addedLen;
             selEnd += addedLen;
           } else {
-            // If selection was inside frontmatter, place insertion after the import statement
             selStart = fmEnd + addedLen;
             selEnd = selStart;
           }
@@ -754,16 +879,25 @@ function App() {
     document.body.style.userSelect = '';
   }
 
+  async function cancelCommand() {
+    try {
+      const res = await invoke<string>('cancel_project_command');
+      setNotice(res);
+    } catch (e) {
+      setNotice(String(e));
+    }
+  }
+
   async function command(operation: 'check' | 'build') {
     setBusy(true);
     const pm = environment?.package_manager || 'npm';
-    setOutput(`Running ${pm} run ${operation}…`);
+    setOutput(`Running ${pm} run ${operation}…\n`);
     try {
       const r = await invoke<CommandResult>('project_command', { path: repository, operation });
-      setOutput(r.output || `Exited with code ${r.code}`);
-      setNotice(r.code === 0 ? `${pm} run ${operation} completed.` : `${pm} run ${operation} failed.`);
+      if (r.output) setOutput(r.output);
+      setNotice(r.code === 0 ? `${pm} run ${operation} completed.` : `${pm} run ${operation} failed with exit code ${r.code}.`);
     } catch (e) {
-      setOutput(String(e));
+      setOutput(prev => `${prev}\n${String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -771,16 +905,19 @@ function App() {
 
   async function installDependencies() {
     setBusy(true);
-    setOutput('Installing the site dependencies…');
+    const pm = environment?.package_manager || 'npm';
+    setOutput(`Installing dependencies with ${pm}…\n`);
     try {
       const result = await invoke<CommandResult>('project_command', { path: repository, operation: 'install' });
-      setOutput(result.output);
+      if (result.output) setOutput(result.output);
       if (result.code === 0) {
         setNotice('Dependencies installed.');
         setEnvironment(await invoke<Environment>('environment', { path: repository }));
-      } else setNotice('Dependency installation failed.');
+      } else {
+        setNotice('Dependency installation failed.');
+      }
     } catch (e) {
-      setOutput(String(e));
+      setOutput(prev => `${prev}\n${String(e)}`);
       setNotice(String(e));
     } finally {
       setBusy(false);
@@ -790,12 +927,13 @@ function App() {
   async function server() {
     setBusy(true);
     try {
-      const start = !output.includes('4321');
-      const result = await invoke<string>(start ? 'run_dev_server' : 'stop_dev_server', { path: repository });
-      setOutput(result);
-      if (start) window.open('http://127.0.0.1:4321', '_blank');
+      const willStart = !devServerRunning;
+      const result = await invoke<string>(willStart ? 'run_dev_server' : 'stop_dev_server', { path: repository });
+      setOutput(prev => (prev ? `${prev}\n${result}` : result));
+      setDevServerRunning(willStart);
+      if (willStart) window.open('http://127.0.0.1:4321', '_blank');
     } catch (e) {
-      setOutput(String(e));
+      setOutput(prev => `${prev}\n${String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -818,16 +956,16 @@ function App() {
     setBusy(true);
     const pm = environment?.package_manager || 'npm';
     try {
-      setOutput(`Running ${pm} run check…`);
+      setOutput(`Running ${pm} run check…\n`);
       const check = await invoke<CommandResult>('project_command', { path: repository, operation: 'check' });
-      setOutput(check.output);
+      if (check.output) setOutput(check.output);
       if (check.code !== 0) {
         setNotice('Check failed. Review the output before publishing.');
         return;
       }
-      setOutput(`Running ${pm} run build…`);
+      setOutput(prev => `${prev}\nRunning ${pm} run build…\n`);
       const build = await invoke<CommandResult>('project_command', { path: repository, operation: 'build' });
-      setOutput(build.output);
+      if (build.output) setOutput(prev => `${prev}\n${build.output}`);
       if (build.code !== 0) {
         setNotice('Build failed. Review the output before publishing.');
         return;
@@ -837,16 +975,16 @@ function App() {
         message: commitMessage || `Update ${selected?.title || 'site content'}`,
       });
       if (pushed.code !== 0) {
-        setOutput(pushed.output);
+        setOutput(prev => `${prev}\n${pushed.output}`);
         setNotice('Push failed. Your local changes and any commit are preserved.');
         return;
       }
-      setOutput(pushed.output);
+      setOutput(prev => `${prev}\n${pushed.output}`);
       setNotice('Pushed successfully. GitHub Pages deployment may still be running.');
       setPublishDialog(false);
       await refreshGit();
     } catch (e) {
-      setOutput(String(e));
+      setOutput(prev => `${prev}\n${String(e)}`);
       setNotice(String(e));
     } finally {
       setBusy(false);
@@ -868,38 +1006,49 @@ function App() {
 
   const content = selected ? (
     <>
-      <div className="docbar">
-        <div className="crumb">
-          <span>{selected.kind}</span>
-          <span className="slash">/</span>
-          <span>{selected.path.split('/').at(-1)}</span>
-          {dirty && <span className="unsaved-dot" title="Unsaved changes" />}
-        </div>
-        <div className="doc-actions">
-          <div className="segmented">
-            <button className={mode === 'edit' ? 'active' : ''} onClick={() => setMode('edit')}>
-              <Code2 size={14} /> Edit
+      <EditorToolbar
+        selected={selected}
+        dirty={dirty}
+        busy={busy}
+        mode={mode}
+        sourceMode={sourceMode}
+        hasSchemaIssues={schemaIssues.length > 0}
+        onSetMode={setMode}
+        onToggleSourceMode={() => setSourceMode(!sourceMode)}
+        onSave={save}
+      />
+
+      {recoveredDraft && (
+        <div className="draft-recovery-banner">
+          <span>
+            <strong>Unsaved draft recovery available</strong> from {new Date(recoveredDraft.timestamp).toLocaleTimeString()}.
+          </span>
+          <div className="draft-recovery-actions">
+            <button
+              className="button button-outline button-xs"
+              onClick={() => {
+                clearDraftRecovery(repository, selected.path);
+                setRecoveredDraft(null);
+              }}
+            >
+              Discard Draft
             </button>
-            <button className={mode === 'preview' ? 'active' : ''} onClick={() => setMode('preview')}>
-              <Eye size={14} /> Preview
+            <button
+              className="button button-primary button-xs"
+              onClick={() => {
+                setSource(recoveredDraft.source);
+                try {
+                  setMetadata(parseSiteDocument(recoveredDraft.source).metadata);
+                } catch {}
+                setRecoveredDraft(null);
+                setNotice('Draft recovered from local storage.');
+              }}
+            >
+              Restore Draft
             </button>
           </div>
-          <button
-            className={`icon-btn ${sourceMode ? 'active' : ''}`}
-            title="Raw source mode"
-            onClick={() => setSourceMode(!sourceMode)}
-          >
-            <Code2 size={16} />
-          </button>
-          <button
-            className="button button-primary button-sm"
-            onClick={save}
-            disabled={!dirty || busy || schemaIssues.length > 0}
-          >
-            <Save size={14} /> Save
-          </button>
         </div>
-      </div>
+      )}
 
       <div className="workarea" ref={workarea}>
         <div className="editor-column">
@@ -917,107 +1066,37 @@ function App() {
                 onChooseImage={chooseImage}
               />
 
-              <section
-                className={`markdown-section ${dropTarget === 'content' ? 'image-drop-active' : ''}`}
-                data-image-drop="content"
-              >
-                <div className="section-title">
-                  <div>
-                    <span className="eyebrow">CONTENT</span>
-                    <h2>{selected.path.endsWith('.mdx') ? 'MDX Source & Components' : 'Markdown Body'}</h2>
-                  </div>
-                  <div className="markdown-tools">
-                    <button
-                      type="button"
-                      className={`tool-button ${wordWrap ? 'active' : ''}`}
-                      onClick={() => setWordWrap(!wordWrap)}
-                      title={wordWrap ? 'Word wrap is ON (lines wrap cleanly)' : 'Word wrap is OFF (lines do not wrap)'}
-                    >
-                      {wordWrap ? 'Wrap: On' : 'Wrap: Off'}
-                    </button>
-                    <button className="tool-button" onClick={() => setSourceMode(!sourceMode)}>
-                      {sourceMode ? 'Rich editor' : 'Raw source'}
-                    </button>
-                    <span className="word-count">{wordsCount} words</span>
-                  </div>
-                </div>
-
-                {dropTarget === 'content' && (
-                  <div className="image-drop-message">Drop image to add it to this document</div>
-                )}
-
-                <FormatToolbar
-                  isMdx={isMdx}
-                  onInsertMarkdown={insertMarkdown}
-                  onInsertTable={insertTable}
-                  onInsertSnippet={insertSnippet}
-                />
-
-                {sourceMode || selected.path.endsWith('.mdx') ? (
-                  <textarea
-                    ref={sourceEditor}
-                    className={`source-editor ${wordWrap ? 'wrap-on' : 'wrap-off'}`}
-                    wrap={wordWrap ? 'soft' : 'off'}
-                    spellCheck={false}
-                    value={source}
-                    onMouseDown={e => {
-                      if (e.button === 1) e.preventDefault();
-                    }}
-                    onAuxClick={e => {
-                      if (e.button === 1) e.preventDefault();
-                    }}
-                    onKeyUp={e => updateCursorPosition(e.currentTarget)}
-                    onClick={e => updateCursorPosition(e.currentTarget)}
-                    onSelect={e => updateCursorPosition(e.currentTarget)}
-                    onChange={e => {
-                      setSource(e.target.value);
-                      try {
-                        setMetadata(parseSiteDocument(e.target.value).metadata);
-                      } catch {}
-                      updateCursorPosition(e.currentTarget);
-                    }}
-                    aria-label="Markdown source"
-                  />
-                ) : (
-                  <textarea
-                    ref={bodyEditor}
-                    className={`markdown-editor ${wordWrap ? 'wrap-on' : 'wrap-off'}`}
-                    wrap={wordWrap ? 'soft' : 'off'}
-                    spellCheck={false}
-                    value={body}
-                    onMouseDown={e => {
-                      if (e.button === 1) e.preventDefault();
-                    }}
-                    onAuxClick={e => {
-                      if (e.button === 1) e.preventDefault();
-                    }}
-                    onKeyUp={e => updateCursorPosition(e.currentTarget)}
-                    onClick={e => updateCursorPosition(e.currentTarget)}
-                    onSelect={e => updateCursorPosition(e.currentTarget)}
-                    onChange={e => {
-                      setSource(replaceMarkdownBody(source, e.target.value));
-                      updateCursorPosition(e.currentTarget);
-                    }}
-                    aria-label="Markdown content"
-                    placeholder="Write your article in Markdown…"
-                  />
-                )}
-
-                <EditorialAuditPanel
-                  issues={editorialIssues}
-                  wordCount={wordsCount}
-                  onFixEmDashes={handleFixEmDashes}
-                />
-
-                <div className="editor-foot">
-                  <span>
-                    {selected.path.endsWith('.mdx')
-                      ? 'MDX source · Interactive components preview in live Astro server'
-                      : 'Markdown · math equations preview approximated via KaTeX'}
-                  </span>
-                  <span>Autosave off</span>
-                </div>
-              </section>
+              <MarkdownEditor
+                selected={selected}
+                source={source}
+                body={body}
+                sourceMode={sourceMode}
+                isMdx={isMdx}
+                wordWrap={wordWrap}
+                wordsCount={wordsCount}
+                dropTarget={dropTarget}
+                editorialIssues={editorialIssues}
+                bodyEditorRef={bodyEditor}
+                sourceEditorRef={sourceEditor}
+                onSourceChange={val => {
+                  setSource(val);
+                  try {
+                    setMetadata(parseSiteDocument(val).metadata);
+                  } catch {}
+                  updateCursorPosition(sourceEditor.current);
+                }}
+                onBodyChange={val => {
+                  setSource(replaceMarkdownBody(source, val));
+                  updateCursorPosition(bodyEditor.current);
+                }}
+                onToggleWordWrap={() => setWordWrap(!wordWrap)}
+                onToggleSourceMode={() => setSourceMode(!sourceMode)}
+                onUpdateCursorPos={updateCursorPosition}
+                onInsertMarkdown={insertMarkdown}
+                onInsertTable={insertTable}
+                onInsertSnippet={insertSnippet}
+                onFixEmDashes={handleFixEmDashes}
+              />
             </>
           )}
 
@@ -1179,204 +1258,62 @@ function App() {
         <main className="main-panel">{content}</main>
       </div>
 
-      <footer className="statusbar">
-        <div className="status-left">
-          <span className="status-dot" />
-          {repository ? repository.split('/').filter(Boolean).at(-1) : 'No repository opened'}
-          {git && (
-            <>
-              <span className="status-divider" />
-              <span>
-                branch <b>{git.branch || 'detached'}</b>
-              </span>
-              <span className="git-count">
-                ↑ {git.ahead} ↓ {git.behind}
-              </span>
-            </>
-          )}
-          {selected && (
-            <>
-              <span className="status-divider" />
-              <span title="Word count and estimated reading time">
-                {wordsCount} words · ~{readTimeMin} min read
-              </span>
-              <span className="status-divider" />
-              <span title="Cursor position">
-                Ln {cursorPos.line}, Col {cursorPos.col}
-              </span>
-            </>
-          )}
-        </div>
-        <div className="status-actions">
-          <button
-            onClick={() => setWordWrap(!wordWrap)}
-            title="Toggle word wrap (Ctrl+Shift+W)"
-            className={wordWrap ? 'status-btn-active' : ''}
-          >
-            Wrap: {wordWrap ? 'On' : 'Off'}
-          </button>
-          <button onClick={server} disabled={!native || !repository || busy}>
-            {output.includes('4321') ? <Square size={13} /> : <Play size={13} />}{' '}
-            {output.includes('4321') ? 'Stop preview' : 'Astro preview'}
-          </button>
-          <button onClick={() => command('check')} disabled={!native || !repository || busy}>
-            <Check size={14} /> Check
-          </button>
-          <button onClick={() => command('build')} disabled={!native || !repository || busy}>
-            <Hammer size={14} /> Build
-          </button>
-        </div>
-      </footer>
+      <StatusBar
+        repository={repository}
+        git={git}
+        selected={selected}
+        wordsCount={wordsCount}
+        readTimeMin={readTimeMin}
+        cursorPos={cursorPos}
+        wordWrap={wordWrap}
+        busy={busy}
+        native={native}
+        devServerRunning={devServerRunning}
+        onToggleWordWrap={() => setWordWrap(!wordWrap)}
+        onToggleServer={server}
+        onRunCommand={command}
+      />
 
       <KeyboardShortcutsDialog
         open={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
       />
 
-      {(notice || output) && (
-        <div className="notice-panel">
-          <div className="notice-header">
-            <strong>{notice || 'Command output'}</strong>
-            <button onClick={() => { setNotice(''); setOutput(''); }}>×</button>
-          </div>
-          {output && <pre>{output}</pre>}
-        </div>
-      )}
+      <OutputPanel
+        notice={notice}
+        output={output}
+        busy={busy}
+        onClear={() => {
+          setNotice('');
+          setOutput('');
+        }}
+        onCancelCommand={cancelCommand}
+      />
 
-      {appearanceDialog && (
-        <div
-          className="modal-backdrop"
-          onMouseDown={e => {
-            if (e.target === e.currentTarget) setAppearanceDialog(false);
-          }}
-        >
-          <section className="appearance-modal">
-            <div className="modal-title">
-              <div>
-                <span className="eyebrow">APPEARANCE</span>
-                <h2>App accent color</h2>
-              </div>
-              <button className="icon-btn" onClick={() => setAppearanceDialog(false)} aria-label="Close appearance settings">
-                ×
-              </button>
-            </div>
-            <p className="modal-copy">
-              Choose a highlight color for buttons, selection, editor controls, and the Blog Editor mark. Your choice is saved on this device.
-            </p>
-            <div className="accent-swatches">
-              {ACCENT_PRESETS.map(preset => (
-                <button
-                  key={preset.value}
-                  className={`accent-swatch ${appAccent === preset.value ? 'selected' : ''}`}
-                  style={{ '--swatch-color': preset.value } as React.CSSProperties}
-                  onClick={() => updateAccent(preset.value)}
-                  aria-label={`${preset.label} accent`}
-                  title={preset.label}
-                />
-              ))}
-            </div>
-            <label className="field">
-              <span>Custom color</span>
-              <div className="color-input accent-input">
-                <input type="color" value={appAccent} onChange={e => updateAccent(e.target.value)} />
-                <input
-                  value={accentDraft}
-                  onChange={e => updateAccent(e.target.value)}
-                  placeholder="#ff5b36"
-                  aria-label="Accent color hex value"
-                />
-              </div>
-            </label>
-            <div className="accent-preview-row">
-              <span className="accent-preview-dot" style={{ background: appAccent }} /> Current app accent{' '}
-              <button className="text-button" onClick={() => updateAccent(DEFAULT_APP_ACCENT)}>
-                Reset
-              </button>
-            </div>
-            <div className="modal-actions">
-              <button className="button button-primary" onClick={() => setAppearanceDialog(false)}>
-                Done
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      <AppearanceDialog
+        open={appearanceDialog}
+        appAccent={appAccent}
+        accentDraft={accentDraft}
+        accentPresets={ACCENT_PRESETS}
+        defaultAccent={DEFAULT_APP_ACCENT}
+        onClose={() => setAppearanceDialog(false)}
+        onUpdateAccent={updateAccent}
+      />
 
-      {newDialog && (
-        <div
-          className="modal-backdrop"
-          onMouseDown={e => {
-            if (e.target === e.currentTarget) setNewDialog(false);
-          }}
-        >
-          <section className="new-document-modal">
-            <div className="modal-title">
-              <div>
-                <span className="eyebrow">CONTENT LIBRARY</span>
-                <h2>Create a document</h2>
-              </div>
-              <button className="icon-btn" onClick={() => setNewDialog(false)}>
-                ×
-              </button>
-            </div>
-            <p className="modal-copy">
-              Create a draft Markdown file in the site’s existing content folder. You can complete its details and preview it before publishing.
-            </p>
-            <label className="field">
-              <span>Content type</span>
-              <select value={newKind} onChange={e => setNewKind(e.target.value as 'writing' | 'projects')}>
-                <option value="writing">Writing Post</option>
-                <option value="projects">Project</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>File format</span>
-              <select value={newExtension} onChange={e => setNewExtension(e.target.value as 'md' | 'mdx')}>
-                <option value="md">Markdown (.md)</option>
-                <option value="mdx">Interactive MDX (.mdx)</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Title</span>
-              <input
-                autoFocus
-                value={newTitle}
-                onChange={e => {
-                  setNewTitle(e.target.value);
-                  setNewSlug(
-                    e.target.value
-                      .toLowerCase()
-                      .normalize('NFKD')
-                      .replace(/[^a-z0-9]+/g, '-')
-                      .replace(/^-|-$/g, '')
-                  );
-                }}
-                placeholder={newKind === 'writing' ? 'A new technical post' : 'A new engineering project'}
-              />
-            </label>
-            <label className="field">
-              <span>Filename <small>without .{newExtension}</small></span>
-              <input value={newSlug} onChange={e => setNewSlug(e.target.value)} placeholder="lowercase-words" />
-            </label>
-            <div className="new-document-note">
-              <span className="draft-badge">Draft</span> New documents start as drafts. Project drafts start with status Concept and fallback wing artwork.
-            </div>
-            <div className="modal-actions">
-              <button className="button button-outline" onClick={() => setNewDialog(false)}>
-                Cancel
-              </button>
-              <button
-                className="button button-primary"
-                onClick={createDocument}
-                disabled={busy || !newTitle.trim() || !newSlug.trim()}
-              >
-                <Plus size={14} />
-                {busy ? 'Creating…' : 'Create draft'}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      <NewDocumentDialog
+        open={newDialog}
+        busy={busy}
+        kind={newKind}
+        extension={newExtension}
+        title={newTitle}
+        slug={newSlug}
+        onClose={() => setNewDialog(false)}
+        onKindChange={setNewKind}
+        onExtensionChange={setNewExtension}
+        onTitleChange={setNewTitle}
+        onSlugChange={setNewSlug}
+        onCreate={createDocument}
+      />
 
       {renameTarget && (
         <RenameDialog
@@ -1405,82 +1342,53 @@ function App() {
         />
       )}
 
-      {publishDialog && (
-        <div
-          className="modal-backdrop"
-          onMouseDown={e => {
-            if (e.target === e.currentTarget) setPublishDialog(false);
+      <PublishDialog
+        open={publishDialog}
+        busy={busy}
+        git={git}
+        commitMessage={commitMessage}
+        diffText={diffText}
+        diffLoading={diffLoading}
+        onClose={() => setPublishDialog(false)}
+        onCommitMessageChange={setCommitMessage}
+        onLoadDiff={loadWorkingDiff}
+        onPublish={publish}
+      />
+
+      {conflictData && selected && (
+        <ConflictDialog
+          filePath={selected.path}
+          localText={conflictData.localText}
+          diskText={conflictData.diskText}
+          busy={busy}
+          onClose={() => setConflictData(null)}
+          onReloadFromDisk={() => {
+            setConflictData(null);
+            void selectEntry(selected, true);
           }}
-        >
-          <section className="publish-modal">
-            <div className="modal-title">
-              <div>
-                <span className="eyebrow">GIT PUBLISH</span>
-                <h2>Review and publish</h2>
-              </div>
-              <button className="icon-btn" onClick={() => setPublishDialog(false)}>
-                ×
-              </button>
-            </div>
-            <p className="modal-copy">
-              Save this document, validate the site, build it, then commit and push the allowed content and public asset changes.
-            </p>
-            <div className="git-summary">
-              <div>
-                <span>Branch</span>
-                <strong>{git?.branch || '—'}</strong>
-              </div>
-              <div>
-                <span>Remote</span>
-                <strong>{git?.upstream || 'No upstream'}</strong>
-              </div>
-              <div>
-                <span>Changed files</span>
-                <strong>{git?.changed.length || 0}</strong>
-              </div>
-              <div>
-                <span>Remote state</span>
-                <strong>
-                  {git?.behind ? `${git.behind} behind` : git?.ahead ? `${git.ahead} ahead` : 'Up to date'}
-                </strong>
-              </div>
-            </div>
-            {git?.behind ? (
-              <div className="validation">Resolve remote changes before publishing.</div>
-            ) : null}
-            <label className="field">
-              <span>Commit message</span>
-              <input value={commitMessage} onChange={e => setCommitMessage(e.target.value)} />
-            </label>
-            <details
-              className="diff-details"
-              onToggle={e => {
-                if (e.currentTarget.open && !diffText) void loadWorkingDiff();
-              }}
-            >
-              <summary>
-                Review working diff <ChevronDown size={14} />
-              </summary>
-              <pre>{diffLoading ? 'Loading diff…' : diffText || 'No unstaged text diff.'}</pre>
-            </details>
-            <div className="modal-actions">
-              <button className="button button-outline" onClick={() => setPublishDialog(false)}>
-                Cancel
-              </button>
-              <button
-                className="button button-primary"
-                onClick={publish}
-                disabled={busy || Boolean(git?.behind)}
-              >
-                <Send size={14} />
-                {busy ? 'Publishing…' : 'Run checks and publish'}
-              </button>
-            </div>
-            <p className="deploy-note">
-              <ExternalLink size={13} /> A successful push triggers GitHub Pages deployment workflow.
-            </p>
-          </section>
-        </div>
+          onOverwriteDisk={handleOverwriteDisk}
+        />
+      )}
+
+      {closeConfirmOpen && selected && (
+        <CloseConfirmDialog
+          fileName={selected.path.split('/').at(-1) || selected.title}
+          busy={busy}
+          onSaveAndClose={async () => {
+            const saved = await save();
+            if (saved) {
+              closeConfirmedRef.current = true;
+              setCloseConfirmOpen(false);
+              await getCurrentWindow().destroy();
+            }
+          }}
+          onDiscardAndClose={async () => {
+            closeConfirmedRef.current = true;
+            setCloseConfirmOpen(false);
+            await getCurrentWindow().destroy();
+          }}
+          onCancel={() => setCloseConfirmOpen(false)}
+        />
       )}
     </div>
   );

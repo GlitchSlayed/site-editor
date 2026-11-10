@@ -962,3 +962,32 @@ body.autoscrolling *{
   color: var(--muted);
 }
 
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 22px;
+  box-shadow: var(--shadow);
+}
+
+.button-xs {
+  height: 24px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.draft-recovery-banner {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.draft-recovery-actions {
+  display: flex;
+  gap: 8px;
+}
+
+
