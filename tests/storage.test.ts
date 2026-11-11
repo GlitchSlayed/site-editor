@@ -82,9 +82,9 @@ describe('safe storage helper', () => {
   });
 
   it('safely parses metadataOpen and wordWrap booleans', () => {
-    expect(getStoredMetadataOpen()).toBe(true);
-    setStoredMetadataOpen(false);
     expect(getStoredMetadataOpen()).toBe(false);
+    setStoredMetadataOpen(true);
+    expect(getStoredMetadataOpen()).toBe(true);
 
     expect(getStoredWordWrap()).toBe(false);
     setStoredWordWrap(true);

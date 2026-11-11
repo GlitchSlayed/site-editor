@@ -52,6 +52,28 @@ pub fn detect_package_manager(root: &Path) -> PackageManager {
     }
 }
 
+pub fn effective_package_manager(root: &Path) -> (PackageManager, Option<String>) {
+    let pm = detect_package_manager(root);
+    let (pm_ver, _) = detected_version(root, pm.as_str());
+    if !pm_ver.is_empty() {
+        return (pm, None);
+    }
+    if pm != PackageManager::Npm {
+        let (npm_ver, _) = detected_version(root, "npm");
+        if !npm_ver.is_empty() {
+            return (
+                PackageManager::Npm,
+                Some(format!(
+                    "{} was detected from project configuration but is not available on this host. Falling back to npm {}.",
+                    pm.as_str(),
+                    npm_ver
+                )),
+            );
+        }
+    }
+    (pm, None)
+}
+
 #[derive(Serialize)]
 pub struct Environment {
     pub package_manager: String,
@@ -68,7 +90,7 @@ pub struct Environment {
 pub async fn environment(path: String) -> Result<Environment, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = repo(&path)?;
-        let pm = detect_package_manager(&root);
+        let (pm, fallback_msg) = effective_package_manager(&root);
         let pm_name = pm.as_str().to_string();
 
         let package: serde_json::Value =
@@ -102,6 +124,10 @@ pub async fn environment(path: String) -> Result<Environment, String> {
         let compatible = major.is_some() && min_major.map_or(true, |min| major.unwrap() >= min);
         let dependencies = root.join("node_modules").is_dir();
         let mut messages = Vec::new();
+
+        if let Some(msg) = fallback_msg {
+            messages.push(msg);
+        }
 
         if node.is_empty() {
             messages.push("Node.js is not available on this host.".into());

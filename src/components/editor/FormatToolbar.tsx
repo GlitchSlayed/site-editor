@@ -248,19 +248,19 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
           type="button"
           onMouseDown={e => e.preventDefault()}
           onClick={() => onInsertMarkdown('$', '$')}
-          title="Inline math"
+          title="Inline math ($...$)"
           aria-label="Inline math"
         >
-          <Sigma />
+          <span style={{ fontSize: '11px', fontFamily: 'serif', fontWeight: 600 }}>$x$</span>
         </button>
         <button
           type="button"
           onMouseDown={e => e.preventDefault()}
           onClick={() => onInsertMarkdown('\n$$\n', '\n$$\n')}
-          title="Display math equation"
+          title="Display math equation ($$...$$)"
           aria-label="Display math"
         >
-          <Sigma size={17} />
+          <Sigma size={16} />
         </button>
         <button
           type="button"

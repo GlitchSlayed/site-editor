@@ -105,17 +105,68 @@ pub fn host_repository(root: &Path) -> Result<PathBuf, String> {
     Err("The site folder’s document portal grant is missing. Reopen the repository with the folder picker, then save again.".into())
 }
 
+static RESOLVED_BINARIES: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> =
+    std::sync::Mutex::new(None);
+
+pub fn host_path_env() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    format!(
+        "{home}/.bun/bin:{home}/.local/bin:{home}/.cargo/bin:{home}/.yarn/bin:/usr/local/bin:/usr/bin:/bin"
+    )
+}
+
+pub fn resolve_host_binary(program: &str) -> String {
+    if !ALLOWED_PROGRAMS.contains(&program) {
+        return program.to_string();
+    }
+    if std::env::var_os("FLATPAK_ID").is_none() {
+        return program.to_string();
+    }
+
+    let mut cache = RESOLVED_BINARIES.lock().unwrap_or_else(|e| e.into_inner());
+    let map = cache.get_or_insert_with(std::collections::HashMap::new);
+    if let Some(resolved) = map.get(program) {
+        return resolved.clone();
+    }
+
+    let host_path = host_path_env();
+    let script = format!(
+        "export PATH=\"{host_path}:$PATH\"; command -v \"$1\" 2>/dev/null || which \"$1\" 2>/dev/null || true"
+    );
+    let output = Command::new("flatpak-spawn")
+        .args(["--host", "--watch-bus", "sh", "-c", &script, "--", program])
+        .output();
+
+    let resolved = match output {
+        Ok(out) if out.status.success() => {
+            let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !found.is_empty() {
+                found
+            } else {
+                program.to_string()
+            }
+        }
+        _ => program.to_string(),
+    };
+
+    map.insert(program.to_string(), resolved.clone());
+    resolved
+}
+
 pub fn command(root: &Path, program: &str) -> Result<Command, String> {
     if !ALLOWED_PROGRAMS.contains(&program) {
         return Err(format!("Program '{program}' is not in the allowed command list."));
     }
     if std::env::var_os("FLATPAK_ID").is_some() {
         let host_root = host_repository(root)?;
+        let host_prog = resolve_host_binary(program);
+        let path_arg = format!("--env=PATH={}", host_path_env());
         let mut c = Command::new("flatpak-spawn");
         c.arg("--host")
             .arg("--watch-bus")
             .arg(format!("--directory={}", host_root.display()))
-            .arg(program);
+            .arg(path_arg)
+            .arg(host_prog);
         Ok(c)
     } else {
         let mut c = Command::new(program);
@@ -145,8 +196,10 @@ pub fn run_host_version(root: &Path, program: &str) -> Result<crate::jobs::Comma
         return Err(format!("Program '{program}' is not in the allowed command list."));
     }
     let o = if std::env::var_os("FLATPAK_ID").is_some() {
+        let host_prog = resolve_host_binary(program);
+        let path_arg = format!("--env=PATH={}", host_path_env());
         Command::new("flatpak-spawn")
-            .args(["--host", "--watch-bus", program, "--version"])
+            .args(["--host", "--watch-bus", &path_arg, &host_prog, "--version"])
             .output()
             .map_err(fail)?
     } else {

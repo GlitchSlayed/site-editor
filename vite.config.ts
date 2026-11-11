@@ -6,7 +6,13 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   clearScreen: false,
-  server: { strictPort: true, port: 1420 },
+  server: {
+    strictPort: true,
+    port: 1420,
+    watch: {
+      ignored: ['**/build-dir/**', '**/.flatpak-builder/**', '**/repo/**', '**/src-tauri/target/**', '**/target/**'],
+    },
+  },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
   build: { target: 'es2022' },
   test: {

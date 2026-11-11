@@ -168,14 +168,7 @@ export const ContentSidebar: React.FC<ContentSidebarProps> = ({
       </div>
 
       <div className="entry-list">
-        {!native ? (
-          <div className="browser-message">
-            <AlertCircle size={16} />
-            <p>
-              Browser mode can preview the interface, but local folders, commands and Git are available only in the desktop app.
-            </p>
-          </div>
-        ) : !repository ? (
+        {!repository && native ? (
           <div className="list-empty">
             Open a website repository to see its writing and project files.
           </div>

@@ -49,7 +49,7 @@ export function MarkdownEditor({
   onInsertSnippet,
   onFixEmDashes,
 }: MarkdownEditorProps) {
-  const isRaw = sourceMode || isMdx;
+  const isRaw = sourceMode;
 
   return (
     <section

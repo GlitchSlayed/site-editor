@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 use tauri::{AppHandle, Emitter, State};
-use crate::env::detect_package_manager;
+use crate::env::effective_package_manager;
 use crate::repo::{command, fail, repo};
 
 #[derive(Serialize, Clone, Debug)]
@@ -101,7 +101,7 @@ pub async fn run_dev_server(
     path: String,
 ) -> Result<String, String> {
     let root = repo(&path)?;
-    let pm = detect_package_manager(&root);
+    let (pm, _) = effective_package_manager(&root);
     let prog = pm.as_str();
 
     let port = find_available_port(4321);

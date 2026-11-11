@@ -58,11 +58,11 @@ export function setStoredAccent(accent: string): void {
 
 export function getStoredMetadataOpen(): boolean {
   try {
-    if (typeof localStorage === 'undefined') return true;
+    if (typeof localStorage === 'undefined') return false;
     const stored = localStorage.getItem('blog-editor-metadata-open');
-    return stored === null ? true : stored === 'true';
+    return stored === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 

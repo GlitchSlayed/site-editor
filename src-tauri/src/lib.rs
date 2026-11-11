@@ -7,12 +7,13 @@ pub mod jobs;
 pub mod repo;
 
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
 use devserver::{DevServerManager, DevServerState};
 use jobs::{JobManager, JobsState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(JobsState(Arc::new(JobManager::default())))
         .manage(DevServerState(Arc::new(Mutex::new(DevServerManager::default()))))
         .plugin(tauri_plugin_dialog::init())
@@ -38,8 +39,19 @@ pub fn run() {
             devserver::stop_dev_server,
             devserver::dev_server_status,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building Tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            if let Some(dev) = app_handle.try_state::<DevServerState>() {
+                let _ = dev.0.lock().map(|mut d| d.stop());
+            }
+            if let Some(jobs) = app_handle.try_state::<JobsState>() {
+                let _ = jobs.0.cancel();
+            }
+        }
+    });
 }
 
 #[cfg(test)]

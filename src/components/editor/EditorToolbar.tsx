@@ -1,4 +1,4 @@
-import { Code2, Eye, Save } from 'lucide-react';
+import { Eye, FileCode, PenLine, Save } from 'lucide-react';
 import type { Entry } from '../sidebar/ContentSidebar';
 
 export interface EditorToolbarProps {
@@ -35,18 +35,18 @@ export function EditorToolbar({
       <div className="doc-actions">
         <div className="segmented">
           <button className={mode === 'edit' ? 'active' : ''} onClick={() => onSetMode('edit')}>
-            <Code2 size={14} /> Edit
+            <PenLine size={13} /> Edit
           </button>
           <button className={mode === 'preview' ? 'active' : ''} onClick={() => onSetMode('preview')}>
-            <Eye size={14} /> Preview
+            <Eye size={13} /> Preview
           </button>
         </div>
         <button
           className={`icon-btn ${sourceMode ? 'active' : ''}`}
-          title="Raw source mode"
+          title={sourceMode ? 'Switch to rich editor' : 'Switch to raw YAML source (Ctrl+Shift+P)'}
           onClick={onToggleSourceMode}
         >
-          <Code2 size={16} />
+          <FileCode size={15} />
         </button>
         <button
           className="button button-primary button-sm"

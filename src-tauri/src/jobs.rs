@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, State};
-use crate::env::{detect_package_manager, PackageManager};
+use crate::env::{effective_package_manager, PackageManager};
 use crate::repo::{command, fail, repo};
 
 #[derive(Serialize, Clone, Debug)]
@@ -61,7 +61,7 @@ pub async fn project_command(
     operation: String,
 ) -> Result<CommandResult, String> {
     let root = repo(&path)?;
-    let pm = detect_package_manager(&root);
+    let (pm, _) = effective_package_manager(&root);
     let prog = pm.as_str();
 
     let args: Vec<&str> = match operation.as_str() {

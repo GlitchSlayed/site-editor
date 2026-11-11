@@ -19,6 +19,7 @@ import {
   clearDraftRecovery,
   type DraftRecoveryEntry,
 } from './lib/draft-recovery';
+import { MOCK_ENTRIES, MOCK_BWB_MDX } from './lib/browser-mock';
 import {
   getStoredRecentRepositories,
   setStoredRecentRepositories,
@@ -185,16 +186,41 @@ function App() {
   }, [appAccent]);
 
   useEffect(() => {
-    if (repository && native) refreshRepository(repository);
+    if (repository && native) {
+      refreshRepository(repository);
+    } else if (!native) {
+      setRepository('The Technical Dispatch & Notebook');
+      setEntries(MOCK_ENTRIES);
+      setSelected(MOCK_ENTRIES[0]);
+      setSource(MOCK_BWB_MDX);
+      setSavedSource(MOCK_BWB_MDX);
+      try {
+        const doc = parseSiteDocument(MOCK_BWB_MDX);
+        setMetadata(doc.metadata);
+        setSavedMetadata(JSON.stringify(doc.metadata));
+      } catch {}
+      setHash('mock-hash-123');
+    }
   }, []);
 
   // Window close interception
+  const lastCloseAttemptRef = useRef<number>(0);
+
   useEffect(() => {
     if (!native) return;
     let unlisten: (() => void) | undefined;
     void getCurrentWindow()
       .onCloseRequested(async event => {
         if (closeConfirmedRef.current) return;
+        const now = Date.now();
+        // If user attempts close again within 2 seconds, bypass guard and force close
+        if (lastCloseAttemptRef.current > 0 && now - lastCloseAttemptRef.current < 2000) {
+          closeConfirmedRef.current = true;
+          await getCurrentWindow().destroy();
+          return;
+        }
+        lastCloseAttemptRef.current = now;
+
         if (dirtyRef.current) {
           event.preventDefault();
           setCloseConfirmOpen(true);
@@ -428,6 +454,21 @@ function App() {
 
   async function selectEntry(item: Entry, force = false) {
     if (!force && dirty && !window.confirm('Discard your unsaved edits and open another file?')) return;
+    if (!native) {
+      setSelected(item);
+      const text = item.path.includes('bwb')
+        ? MOCK_BWB_MDX
+        : `---\ntitle: "${item.title}"\ndate: 2026-10-20\ncategory: Aerospace\ntags:\n  - Engineering\ndraft: false\n---\n\n# ${item.title}\n\nTechnical monograph body content...\n`;
+      const doc = parseSiteDocument(text);
+      setSource(text);
+      setSavedSource(text);
+      setMetadata(doc.metadata);
+      setSavedMetadata(JSON.stringify(doc.metadata));
+      setHash('mock-hash');
+      setMode('edit');
+      setNotice('');
+      return;
+    }
     try {
       const file = await invoke<FileData>('read_article', { path: repository, file: item.path });
       const doc = parseSiteDocument(file.text);
@@ -1370,9 +1411,9 @@ function App() {
         />
       )}
 
-      {closeConfirmOpen && selected && (
+      {closeConfirmOpen && (
         <CloseConfirmDialog
-          fileName={selected.path.split('/').at(-1) || selected.title}
+          fileName={selected?.path.split('/').at(-1) || selected?.title || 'Unsaved Document'}
           busy={busy}
           onSaveAndClose={async () => {
             const saved = await save();
