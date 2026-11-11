@@ -44,6 +44,17 @@ impl JobManager {
 pub struct JobsState(pub Arc<JobManager>);
 
 #[tauri::command]
+pub fn exit_app(
+    app: AppHandle,
+    dev: State<'_, crate::devserver::DevServerState>,
+    jobs: State<'_, JobsState>,
+) {
+    let _ = dev.0.lock().map(|mut d| d.stop());
+    let _ = jobs.0.cancel();
+    app.exit(0);
+}
+
+#[tauri::command]
 pub async fn cancel_project_command(state: State<'_, JobsState>) -> Result<String, String> {
     let cancelled = state.0.cancel()?;
     if cancelled {

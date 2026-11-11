@@ -27,6 +27,7 @@ export interface ShortcutOptions {
   onCloseDuplicateDialog: () => void;
   onCloseDeleteDialog: () => void;
   onSearchFocus: () => void;
+  onQuit?: () => void;
 }
 
 export function handleShortcutKeyDown(
@@ -53,6 +54,13 @@ export function handleShortcutKeyDown(
         isSavingRef.current = false;
       });
     }
+    return;
+  }
+
+  // 1b. Quit: Ctrl+Q / Cmd+Q
+  if (modKey && !e.shiftKey && e.key.toLowerCase() === 'q') {
+    e.preventDefault?.();
+    opts.onQuit?.();
     return;
   }
 

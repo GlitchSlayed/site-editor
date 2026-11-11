@@ -206,17 +206,30 @@ function App() {
   // Window close interception
   const lastCloseAttemptRef = useRef<number>(0);
 
+  const requestAppExit = async () => {
+    if (native) {
+      try {
+        await invoke('exit_app');
+      } catch {
+        await getCurrentWindow().destroy();
+      }
+    }
+  };
+
   useEffect(() => {
     if (!native) return;
     let unlisten: (() => void) | undefined;
     void getCurrentWindow()
       .onCloseRequested(async event => {
-        if (closeConfirmedRef.current) return;
+        if (closeConfirmedRef.current) {
+          await requestAppExit();
+          return;
+        }
         const now = Date.now();
-        // If user attempts close again within 2 seconds, bypass guard and force close
+        // If user attempts close again within 2 seconds, bypass guard and force exit
         if (lastCloseAttemptRef.current > 0 && now - lastCloseAttemptRef.current < 2000) {
           closeConfirmedRef.current = true;
-          await getCurrentWindow().destroy();
+          await requestAppExit();
           return;
         }
         lastCloseAttemptRef.current = now;
@@ -224,6 +237,9 @@ function App() {
         if (dirtyRef.current) {
           event.preventDefault();
           setCloseConfirmOpen(true);
+        } else {
+          closeConfirmedRef.current = true;
+          await requestAppExit();
         }
       })
       .then(stop => {
@@ -719,6 +735,7 @@ function App() {
     onCloseDuplicateDialog: () => setDuplicateTarget(null),
     onCloseDeleteDialog: () => setDeleteTarget(null),
     onSearchFocus: () => document.querySelector<HTMLInputElement>('.search-box input')?.focus(),
+    onQuit: requestAppExit,
   });
 
   function insertMarkdown(before: string, after = '', linePrefix?: string, placeholder = 'text') {
@@ -1420,13 +1437,13 @@ function App() {
             if (saved) {
               closeConfirmedRef.current = true;
               setCloseConfirmOpen(false);
-              await getCurrentWindow().destroy();
+              await requestAppExit();
             }
           }}
           onDiscardAndClose={async () => {
             closeConfirmedRef.current = true;
             setCloseConfirmOpen(false);
-            await getCurrentWindow().destroy();
+            await requestAppExit();
           }}
           onCancel={() => setCloseConfirmOpen(false)}
         />

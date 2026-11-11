@@ -4,6 +4,6 @@
   "version": "0.3.0",
   "identifier": "com.glitchslayed.site-editor",
   "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://127.0.0.1:1420", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
-  "app": { "windows": [{ "title": "Purpose", "width": 1420, "height": 920, "minWidth": 1040, "minHeight": 680 }], "security": { "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*" } },
+  "app": { "windows": [{ "title": "Purpose", "width": 1420, "height": 920, "minWidth": 1040, "minHeight": 680 }], "security": { "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*" } },
   "bundle": { "active": true, "targets": ["deb", "rpm", "appimage"], "icon": ["icons/128x128.png", "icons/128x128@2x.png"], "category": "Development", "shortDescription": "Purpose - Technical Dispatch & Scientific Monograph Desktop Editor", "longDescription": "Purpose is the desktop monograph and technical notebook editor for the Technical Dispatch website." }
 }

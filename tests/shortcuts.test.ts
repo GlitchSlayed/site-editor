@@ -117,4 +117,15 @@ describe('useShortcuts keyboard handler', () => {
     expect(opts3.onCloseShortcuts).toHaveBeenCalledTimes(1);
     expect(opts3.onCloseOutline).not.toHaveBeenCalled();
   });
+
+  it('triggers onQuit on Ctrl+Q / Cmd+Q', () => {
+    const onQuit = vi.fn();
+    const opts = createMockOpts({ onQuit });
+    const isSaving = { current: false };
+    const preventDefault = vi.fn();
+
+    handleShortcutKeyDown({ key: 'q', ctrlKey: true, preventDefault }, opts, isSaving);
+    expect(preventDefault).toHaveBeenCalled();
+    expect(onQuit).toHaveBeenCalledTimes(1);
+  });
 });
