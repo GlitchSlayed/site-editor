@@ -2,7 +2,7 @@
   "name": "purpose",
   "productName": "Purpose",
   "description": "Technical Dispatch & Scientific Monograph Desktop Editor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {

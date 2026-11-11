@@ -1,6 +1,6 @@
 # Purpose — Technical Dispatch & Monograph Desktop Editor
 
-**Purpose** (v0.2.0) is a dedicated desktop application engineered specifically for **The Technical Dispatch & Notebook**. Built with a modern **React 19 + TypeScript + Vite** frontend inside a native **Tauri 2 + Rust** desktop shell and packaged as a containerized **Flatpak** for Linux.
+**Purpose** (v0.3.0) is a dedicated desktop application engineered specifically for **The Technical Dispatch & Notebook**. Built with a modern **React 19 + TypeScript + Vite** frontend inside a native **Tauri 2 + Rust** desktop shell and packaged as a containerized **Flatpak** for Linux.
 
 It gives authors an archival, distraction-free environment to draft and publish technical monographs, engineering notes, interactive MDX components, and mathematical treatises directly into their Astro content collections.
 

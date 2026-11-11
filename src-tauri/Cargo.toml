@@ -1,6 +1,6 @@
 [package]
 name = "glitchys-site-editor"
-version = "0.2.0"
+version = "0.3.0"
 description = "Purpose - Technical Monograph & Content Editor"
 authors = ["Vansh Datta"]
 edition = "2021"
