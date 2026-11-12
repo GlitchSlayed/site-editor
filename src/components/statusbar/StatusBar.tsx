@@ -1,5 +1,7 @@
-import { Play, Square, Check, Hammer } from 'lucide-react';
+import { useState } from 'react';
+import { Play, Square, Hammer, ChevronUp, GitBranch } from 'lucide-react';
 import type { Entry } from '../sidebar/ContentSidebar';
+import { BuildMenuPopover } from './BuildMenuPopover';
 
 export interface StatusBarGitInfo {
   branch: string;
@@ -30,61 +32,103 @@ export function StatusBar({
   wordsCount,
   readTimeMin,
   cursorPos,
-  wordWrap,
+  wordWrap: _wordWrap,
   busy,
   native,
   devServerRunning,
-  onToggleWordWrap,
+  onToggleWordWrap: _onToggleWordWrap,
   onToggleServer,
   onRunCommand,
 }: StatusBarProps) {
+  const [buildMenuOpen, setBuildMenuOpen] = useState(false);
+
   return (
-    <footer className="statusbar">
+    <footer className="statusbar studio-statusbar">
+      {/* LEFT: Editorial Metrics */}
       <div className="status-left">
-        <span className="status-dot" />
-        {repository ? repository.split('/').filter(Boolean).at(-1) : 'No repository opened'}
-        {git && (
+        {selected ? (
           <>
-            <span className="status-divider" />
-            <span>
-              branch <b>{git.branch || 'detached'}</b>
-            </span>
-            <span className="git-count">
-              ↑ {git.ahead} ↓ {git.behind}
-            </span>
-          </>
-        )}
-        {selected && (
-          <>
-            <span className="status-divider" />
-            <span title="Word count and estimated reading time">
-              {wordsCount} words · ~{readTimeMin} min read
-            </span>
-            <span className="status-divider" />
-            <span title="Cursor position">
+            <span className="status-coord">
               Ln {cursorPos.line}, Col {cursorPos.col}
             </span>
+            <span className="status-dot-sep">·</span>
+            <span className="status-metric" title="Total word count">
+              {wordsCount.toLocaleString()} words
+            </span>
+            <span className="status-dot-sep">·</span>
+            <span className="status-metric" title="Estimated reading time">
+              ~{readTimeMin} min read
+            </span>
           </>
+        ) : (
+          <span className="status-idle-text">
+            {repository ? repository.split('/').filter(Boolean).at(-1) : 'No repository active'}
+          </span>
         )}
       </div>
-      <div className="status-actions">
+
+      {/* CENTER: Version Control State */}
+      <div className="status-center">
+        {git ? (
+          <div className="status-git-badge" title={`Branch: ${git.branch}`}>
+            <GitBranch size={12} className="git-branch-icon" />
+            <span className="git-branch-name">{git.branch || 'detached'}</span>
+            <span className="git-sync-arrows" title="Commits ahead / behind upstream">
+              ↑{git.ahead} ↓{git.behind}
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      {/* RIGHT: Astro Dev Server Pill & Project Workflows */}
+      <div className="status-right">
+        {/* Astro Runner Pill */}
         <button
-          onClick={onToggleWordWrap}
-          title="Toggle word wrap (Ctrl+Shift+W)"
-          className={wordWrap ? 'status-btn-active' : ''}
+          type="button"
+          className={`astro-runner-pill ${devServerRunning ? 'running' : 'offline'}`}
+          onClick={onToggleServer}
+          disabled={!native || !repository || busy}
+          title={
+            devServerRunning
+              ? 'Astro dev server is running on http://127.0.0.1:4321. Click to stop.'
+              : 'Start local Astro dev server'
+          }
         >
-          Wrap: {wordWrap ? 'On' : 'Off'}
+          {devServerRunning ? (
+            <>
+              <span className="astro-pulse-dot" />
+              <span className="astro-pill-text">Astro :4321</span>
+              <Square size={10} className="astro-stop-icon" />
+            </>
+          ) : (
+            <>
+              <Play size={10} className="astro-play-icon" />
+              <span className="astro-pill-text">Astro Dev</span>
+            </>
+          )}
         </button>
-        <button onClick={onToggleServer} disabled={!native || !repository || busy}>
-          {devServerRunning ? <Square size={13} /> : <Play size={13} />}{' '}
-          {devServerRunning ? 'Stop preview' : 'Astro preview'}
-        </button>
-        <button onClick={() => onRunCommand('check')} disabled={!native || !repository || busy}>
-          <Check size={14} /> Check
-        </button>
-        <button onClick={() => onRunCommand('build')} disabled={!native || !repository || busy}>
-          <Hammer size={14} /> Build
-        </button>
+
+        {/* Project Workflows Menu */}
+        <div className="status-workflows-container">
+          <button
+            type="button"
+            className={`status-workflows-btn ${buildMenuOpen ? 'active' : ''}`}
+            onClick={() => setBuildMenuOpen(o => !o)}
+            disabled={!native || !repository || busy}
+            title="Run Astro Check or Build"
+          >
+            <Hammer size={12} />
+            <span>Workflows</span>
+            <ChevronUp size={10} className="workflows-chevron" />
+          </button>
+
+          <BuildMenuPopover
+            open={buildMenuOpen}
+            busy={busy}
+            onRunCommand={onRunCommand}
+            onClose={() => setBuildMenuOpen(false)}
+          />
+        </div>
       </div>
     </footer>
   );

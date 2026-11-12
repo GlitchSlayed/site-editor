@@ -12,6 +12,7 @@ export interface MarkdownEditorProps {
   isMdx: boolean;
   wordWrap: boolean;
   wordsCount: number;
+  zenMode?: boolean;
   dropTarget: 'content' | 'visual' | null;
   editorialIssues: EditorialIssue[];
   bodyEditorRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -20,6 +21,7 @@ export interface MarkdownEditorProps {
   onBodyChange: (val: string) => void;
   onToggleWordWrap: () => void;
   onToggleSourceMode: () => void;
+  onToggleZenMode?: () => void;
   onUpdateCursorPos: (el: HTMLTextAreaElement | null) => void;
   onInsertMarkdown: (before: string, after?: string, linePrefix?: string, placeholder?: string) => void;
   onInsertTable: () => void;
@@ -35,14 +37,16 @@ export function MarkdownEditor({
   isMdx,
   wordWrap,
   wordsCount,
+  zenMode = false,
   dropTarget,
   editorialIssues,
   bodyEditorRef,
   sourceEditorRef,
   onSourceChange,
   onBodyChange,
-  onToggleWordWrap,
-  onToggleSourceMode,
+  onToggleWordWrap: _onToggleWordWrap,
+  onToggleSourceMode: _onToggleSourceMode,
+  onToggleZenMode,
   onUpdateCursorPos,
   onInsertMarkdown,
   onInsertTable,
@@ -53,36 +57,17 @@ export function MarkdownEditor({
 
   return (
     <section
-      className={`markdown-section ${dropTarget === 'content' ? 'image-drop-active' : ''}`}
+      className={`markdown-section ${dropTarget === 'content' ? 'image-drop-active' : ''} ${zenMode ? 'zen-active' : ''}`}
       data-image-drop="content"
     >
-      <div className="section-title">
-        <div>
-          <span className="eyebrow">CONTENT</span>
-          <h2>{isMdx ? 'MDX Source & Components' : 'Markdown Body'}</h2>
-        </div>
-        <div className="markdown-tools">
-          <button
-            type="button"
-            className={`tool-button ${wordWrap ? 'active' : ''}`}
-            onClick={onToggleWordWrap}
-            title={wordWrap ? 'Word wrap is ON (lines wrap cleanly)' : 'Word wrap is OFF (lines do not wrap)'}
-          >
-            {wordWrap ? 'Wrap: On' : 'Wrap: Off'}
-          </button>
-          <button className="tool-button" onClick={onToggleSourceMode}>
-            {sourceMode ? 'Rich editor' : 'Raw source'}
-          </button>
-          <span className="word-count">{wordsCount} words</span>
-        </div>
-      </div>
-
       {dropTarget === 'content' && (
         <div className="image-drop-message">Drop image to add it to this document</div>
       )}
 
       <FormatToolbar
         isMdx={isMdx}
+        zenMode={zenMode}
+        onToggleZenMode={onToggleZenMode}
         onInsertMarkdown={onInsertMarkdown}
         onInsertTable={onInsertTable}
         onInsertSnippet={onInsertSnippet}
@@ -125,7 +110,7 @@ export function MarkdownEditor({
           onSelect={e => onUpdateCursorPos(e.currentTarget)}
           onChange={e => onBodyChange(e.target.value)}
           aria-label="Markdown content"
-          placeholder="Write your article in Markdown…"
+          placeholder="Begin writing your monograph in Markdown…"
         />
       )}
 
@@ -138,10 +123,10 @@ export function MarkdownEditor({
       <div className="editor-foot">
         <span>
           {isMdx
-            ? 'MDX source · Interactive components preview in live Astro server'
-            : 'Markdown · math equations preview approximated via KaTeX'}
+            ? 'MDX active · Interactive site components preview via Astro server'
+            : 'Markdown active · Math equations formatted via KaTeX'}
         </span>
-        <span>Autosave draft recovery enabled</span>
+        <span>Autosave recovery active</span>
       </div>
     </section>
   );

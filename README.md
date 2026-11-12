@@ -11,13 +11,14 @@ It gives authors an archival, distraction-free environment to draft and publish 
 ```mermaid
 flowchart TD
     subgraph UI ["Purpose Desktop Frontend"]
-        A["AppHeader (Purpose Branding & Theme Toggle)"]
-        B["ContentSidebar (Articles & Projects Library)"]
+        A["StudioBar (Branding, Repo Switcher, Canvas Modes & Action Menu)"]
+        B["ContentSidebar (Archival Content Shelf & Filter Chips)"]
         C["MetadataEditor (Structured YAML Frontmatter & Tag Chips)"]
-        D["FormatToolbar (MDX Snippets & Markdown Formatters)"]
+        D["FormatRibbon (Contextual Dropdowns & MDX Palette)"]
         E["DocumentOutlineDrawer (Live Headings TOC)"]
         F["ArticlePreviewPane (Monograph Spread & MDX Cards)"]
         G["EditorialAuditPanel (Em-Dash & Buzzword Linter)"]
+        H["StatusBar (Ambient Metrics, Git Sync & Astro Dev Runner)"]
     end
 
     subgraph Native ["Tauri 2 / Rust Native Core"]

@@ -1,5 +1,15 @@
-import React from 'react';
-import { Search, Plus, RotateCw, PanelLeftClose, FileText, Layers, AlertCircle, Copy, Edit2, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Search,
+  Plus,
+  RotateCw,
+  FileText,
+  Layers,
+  AlertCircle,
+  MoreVertical,
+  X,
+} from 'lucide-react';
+import { EntryActionMenu } from './EntryActionMenu';
 
 export interface Entry {
   path: string;
@@ -67,12 +77,15 @@ export const ContentSidebar: React.FC<ContentSidebarProps> = ({
   onSelectEntry,
   onNewClick,
   onRefresh,
-  onCollapse,
+  onCollapse: _onCollapse,
   onInstallDependencies,
   onRenameClick,
   onDuplicateClick,
   onDeleteClick,
 }) => {
+  const [activeMenuEntry, setActiveMenuEntry] = useState<Entry | null>(null);
+  const [menuAnchorRect, setMenuAnchorRect] = useState<DOMRect | null>(null);
+
   const filtered = entries.filter(
     e =>
       (type === 'All' || e.kind === type) &&
@@ -80,88 +93,141 @@ export const ContentSidebar: React.FC<ContentSidebarProps> = ({
       `${e.title} ${e.path}`.toLowerCase().includes(search.toLowerCase())
   );
 
+  const handleOpenMenu = (e: React.MouseEvent, entry: Entry) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setMenuAnchorRect(rect);
+    setActiveMenuEntry(entry);
+  };
+
   return (
-    <aside className="sidebar">
+    <aside className="sidebar studio-sidebar">
+      {/* Sidebar Header */}
       <div className="sidebar-top">
         <div className="library-heading">
-          <div className="sidebar-label">CONTENT LIBRARY</div>
+          <div className="sidebar-label">CONTENT SHELF</div>
           <div className="library-actions">
             <button
-              className="icon-btn library-collapse"
-              onClick={onCollapse}
-              aria-label="Collapse Content Library"
-              title="Collapse Content Library"
+              type="button"
+              className="studio-icon-btn refresh-btn"
+              onClick={onRefresh}
+              disabled={busy || !repository}
+              title="Refresh repository files"
+              aria-label="Refresh files"
             >
-              <PanelLeftClose size={15} />
+              <RotateCw size={13} className={busy ? 'spin' : ''} />
             </button>
             <button
-              className="new-content-button"
+              type="button"
+              className="studio-btn studio-btn-primary studio-btn-sm new-content-button"
               onClick={onNewClick}
               disabled={!repository || !native}
-              title={repository ? 'Create a post or project' : 'Open a repository first'}
+              title={repository ? 'Create a new article or project' : 'Open a repository first'}
             >
-              <Plus size={14} /> New
+              <Plus size={13} />
+              <span>New</span>
             </button>
           </div>
         </div>
 
-        <div className="search-box">
-          <Search size={15} />
+        {/* Search input with clear button */}
+        <div className="sidebar-search">
+          <Search size={14} className="search-icon" />
           <input
-            placeholder="Search files…"
+            type="text"
+            placeholder="Search manuscripts…"
             value={search}
             onChange={e => onSearchChange(e.target.value)}
           />
-          <kbd>⌘ K</kbd>
-        </div>
-
-        <div className="filter-tabs">
-          {(['All', 'Writing', 'Projects'] as const).map(t => (
+          {search ? (
             <button
-              key={t}
-              className={type === t ? 'selected' : ''}
-              onClick={() => onTypeChange(t)}
+              type="button"
+              className="search-clear-btn"
+              onClick={() => onSearchChange('')}
+              aria-label="Clear search"
             >
-              {t}
+              <X size={12} />
             </button>
-          ))}
+          ) : (
+            <kbd className="search-kbd">⌘K</kbd>
+          )}
         </div>
 
-        <div className="filter-select">
-          <select
-            value={stateFilter}
-            onChange={e => onStateFilterChange(e.target.value as typeof stateFilter)}
+        {/* Filter Chip Pills (unified single bar) */}
+        <div className="sidebar-filter-chips">
+          <button
+            type="button"
+            className={`filter-chip ${type === 'All' && stateFilter === 'All' ? 'active' : ''}`}
+            onClick={() => {
+              onTypeChange('All');
+              onStateFilterChange('All');
+            }}
           >
-            <option>All</option>
-            <option>Drafts</option>
-            <option>Published</option>
-          </select>
-          <span>{filtered.length} files</span>
+            All
+          </button>
+          <button
+            type="button"
+            className={`filter-chip ${type === 'Writing' ? 'active' : ''}`}
+            onClick={() => {
+              onTypeChange('Writing');
+              if (stateFilter === 'Drafts') onStateFilterChange('All');
+            }}
+          >
+            Writing
+          </button>
+          <button
+            type="button"
+            className={`filter-chip ${type === 'Projects' ? 'active' : ''}`}
+            onClick={() => {
+              onTypeChange('Projects');
+              if (stateFilter === 'Drafts') onStateFilterChange('All');
+            }}
+          >
+            Projects
+          </button>
+          <button
+            type="button"
+            className={`filter-chip ${stateFilter === 'Drafts' ? 'active' : ''}`}
+            onClick={() => {
+              onStateFilterChange(stateFilter === 'Drafts' ? 'All' : 'Drafts');
+            }}
+          >
+            Drafts
+          </button>
+          <span className="filter-count">{filtered.length}</span>
         </div>
 
+        {/* Schema warnings if any */}
         {schemaIssues.length > 0 && (
-          <div className="environment-card">
-            <AlertCircle size={14} />
-            <div>
-              <p>The site’s content schema differs from this adapter. Saving and publishing are disabled.</p>
+          <div className="sidebar-alert-card">
+            <AlertCircle size={14} className="alert-icon" />
+            <div className="alert-body">
+              <strong className="alert-title">Schema Warning</strong>
+              <p>The site’s content.config schema differs from this adapter.</p>
               {schemaIssues.map(issue => (
-                <p key={issue}>{issue}</p>
+                <small key={issue} className="alert-detail">{issue}</small>
               ))}
             </div>
           </div>
         )}
 
+        {/* Environment / Dependencies warning banner */}
         {native && environment && environment.messages.length > 0 && (
-          <div className="environment-card">
-            <AlertCircle size={14} />
-            <div>
+          <div className="sidebar-alert-card">
+            <AlertCircle size={14} className="alert-icon" />
+            <div className="alert-body">
               {environment.messages.map(m => (
                 <p key={m}>{m}</p>
               ))}
               {!environment.dependencies_installed &&
                 (environment.package_manager_version || environment.runtime_version || environment.npm_version) &&
                 (environment.runtime_compatible ?? environment.node_compatible ?? true) && (
-                  <button onClick={onInstallDependencies} disabled={busy}>
+                  <button
+                    type="button"
+                    className="studio-btn studio-btn-outline studio-btn-xs"
+                    onClick={onInstallDependencies}
+                    disabled={busy}
+                  >
                     Install site dependencies
                   </button>
                 )}
@@ -170,10 +236,15 @@ export const ContentSidebar: React.FC<ContentSidebarProps> = ({
         )}
       </div>
 
-      <div className="entry-list">
+      {/* Manuscript List */}
+      <div className="entry-list studio-entry-list">
         {!repository && native ? (
           <div className="list-empty">
-            Open a website repository to see its writing and project files.
+            Open a website repository to see writing and project manuscripts.
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="list-empty">
+            {search ? 'No manuscripts match your search.' : 'No entries found in this collection.'}
           </div>
         ) : (
           filtered.map(item => {
@@ -182,51 +253,30 @@ export const ContentSidebar: React.FC<ContentSidebarProps> = ({
             return (
               <div
                 key={item.path}
-                className={`entry-row ${isSelected ? 'active' : ''}`}
+                className={`studio-entry-row ${isSelected ? 'active' : ''}`}
                 onClick={() => onSelectEntry(item)}
               >
-                <div className="entry">
+                <div className="entry-main">
                   <span className="entry-icon">
-                    {item.kind === 'Writing' ? <FileText size={15} /> : <Layers size={15} />}
+                    {item.kind === 'Writing' ? <FileText size={14} /> : <Layers size={14} />}
                   </span>
-                  <span className="entry-copy">
-                    <strong>{item.title}</strong>
-                    <small>{filename}</small>
-                  </span>
-                  {item.draft && <span className="draft-badge">Draft</span>}
-                  {isSelected && dirty && <span className="dirty-dot" title="Unsaved changes" />}
+                  <div className="entry-copy">
+                    <strong className="entry-title">{item.title}</strong>
+                    <span className="entry-filename">{filename}</span>
+                  </div>
+                  {item.draft && <span className="entry-draft-badge">Draft</span>}
+                  {isSelected && dirty && <span className="entry-dirty-dot" title="Unsaved edits" />}
                 </div>
 
-                <div className="entry-row-actions">
+                <div className="entry-hover-actions">
                   <button
-                    className="entry-action-btn"
-                    title="Rename / slug"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onRenameClick(item);
-                    }}
+                    type="button"
+                    className="entry-kebab-btn"
+                    onClick={e => handleOpenMenu(e, item)}
+                    title="Manuscript actions"
+                    aria-label="Manuscript actions"
                   >
-                    <Edit2 size={12} />
-                  </button>
-                  <button
-                    className="entry-action-btn"
-                    title="Duplicate as draft"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onDuplicateClick(item);
-                    }}
-                  >
-                    <Copy size={12} />
-                  </button>
-                  <button
-                    className="entry-action-btn danger"
-                    title="Delete document"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onDeleteClick(item);
-                    }}
-                  >
-                    <Trash2 size={12} />
+                    <MoreVertical size={13} />
                   </button>
                 </div>
               </div>
@@ -235,14 +285,21 @@ export const ContentSidebar: React.FC<ContentSidebarProps> = ({
         )}
       </div>
 
-      <div className="sidebar-bottom">
-        <button className="sidebar-item" onClick={onCollapse}>
-          <PanelLeftClose size={15} /> Collapse sidebar
-        </button>
-        <button className="sidebar-item" onClick={onRefresh} disabled={!repository}>
-          <RotateCw size={14} /> Refresh library
-        </button>
-      </div>
+      {/* Contextual Action Popover */}
+      {activeMenuEntry && (
+        <EntryActionMenu
+          entry={activeMenuEntry}
+          open={Boolean(activeMenuEntry)}
+          anchorRect={menuAnchorRect}
+          onRename={() => onRenameClick(activeMenuEntry)}
+          onDuplicate={() => onDuplicateClick(activeMenuEntry)}
+          onDelete={() => onDeleteClick(activeMenuEntry)}
+          onClose={() => {
+            setActiveMenuEntry(null);
+            setMenuAnchorRect(null);
+          }}
+        />
+      )}
     </aside>
   );
 };

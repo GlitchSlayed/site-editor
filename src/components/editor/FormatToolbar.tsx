@@ -1,33 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Heading1,
-  Heading2,
-  Heading3,
-  Heading4,
+  Heading,
   Bold,
   Italic,
   Strikethrough,
-  Quote,
+  Code,
   List,
   ListOrdered,
   ListTodo,
-  Link,
-  Image,
-  Code,
-  CodeXml,
+  Quote,
   Minus,
-  Table,
+  Link as LinkIcon,
+  Image as ImageIcon,
+  Table as TableIcon,
   Sigma,
-  Component,
+  Plus,
   ChevronDown,
   Search,
+  Maximize2,
+  Minimize2,
   X,
-  Sparkles,
 } from 'lucide-react';
 import { MDX_COMPONENTS_CATALOG, MdxComponentSnippet } from '@/lib/mdx-components-catalog';
 
 interface FormatToolbarProps {
   isMdx: boolean;
+  zenMode?: boolean;
+  onToggleZenMode?: () => void;
   onInsertMarkdown: (before: string, after?: string, linePrefix?: string, placeholder?: string) => void;
   onInsertTable: () => void;
   onInsertSnippet: (snippet: string, importStatement?: string) => void;
@@ -35,44 +34,56 @@ interface FormatToolbarProps {
 
 export const FormatToolbar: React.FC<FormatToolbarProps> = ({
   isMdx,
+  zenMode = false,
+  onToggleZenMode,
   onInsertMarkdown,
   onInsertTable,
   onInsertSnippet,
 }) => {
+  const [headingMenuOpen, setHeadingMenuOpen] = useState(false);
+  const [structureMenuOpen, setStructureMenuOpen] = useState(false);
   const [mdxMenuOpen, setMdxMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const menuRef = useRef<HTMLDivElement>(null);
+
+  const headingRef = useRef<HTMLDivElement>(null);
+  const structureRef = useRef<HTMLDivElement>(null);
+  const mdxRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Click outside and Escape key handler
+  // Close menus on outside click or Escape
   useEffect(() => {
-    if (!mdxMenuOpen) return;
-
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (headingRef.current && !headingRef.current.contains(target)) {
+        setHeadingMenuOpen(false);
+      }
+      if (structureRef.current && !structureRef.current.contains(target)) {
+        setStructureMenuOpen(false);
+      }
+      if (mdxRef.current && !mdxRef.current.contains(target)) {
         setMdxMenuOpen(false);
       }
     }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setHeadingMenuOpen(false);
+        setStructureMenuOpen(false);
         setMdxMenuOpen(false);
       }
     }
-
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
-
-    // Focus search input when menu opens
-    const timer = setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 50);
-
     return () => {
-      clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
+  }, []);
+
+  useEffect(() => {
+    if (mdxMenuOpen) {
+      const timer = setTimeout(() => searchInputRef.current?.focus(), 60);
+      return () => clearTimeout(timer);
+    }
   }, [mdxMenuOpen]);
 
   const handleSelectSnippet = (snippet: MdxComponentSnippet) => {
@@ -92,281 +103,342 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
   });
 
   return (
-    <div className="format-toolbar" role="toolbar" aria-label="Markdown and MDX formatting">
-      <div className="format-group" aria-label="Headings">
+    <div className="format-ribbon" role="toolbar" aria-label="Formatting ribbon">
+      {/* 1. Headings & Blocks Dropdown */}
+      <div className="ribbon-cluster" ref={headingRef}>
         <button
           type="button"
+          className={`ribbon-dropdown-btn ${headingMenuOpen ? 'active' : ''}`}
           onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('# ', '')}
-          title="Heading 1"
-          aria-label="Heading 1"
+          onClick={() => {
+            setHeadingMenuOpen(o => !o);
+            setStructureMenuOpen(false);
+            setMdxMenuOpen(false);
+          }}
+          title="Headings & Paragraph Style"
         >
-          <Heading1 />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('## ', '')}
-          title="Heading 2"
-          aria-label="Heading 2"
-        >
-          <Heading2 />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('### ', '')}
-          title="Heading 3"
-          aria-label="Heading 3"
-        >
-          <Heading3 />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('#### ', '')}
-          title="Heading 4"
-          aria-label="Heading 4"
-        >
-          <Heading4 />
-        </button>
-      </div>
-
-      <span className="format-divider" />
-
-      <div className="format-group" aria-label="Text style">
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('**', '**')}
-          title="Bold"
-          aria-label="Bold"
-        >
-          <Bold />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('*', '*')}
-          title="Italic"
-          aria-label="Italic"
-        >
-          <Italic />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('~~', '~~')}
-          title="Strikethrough"
-          aria-label="Strikethrough"
-        >
-          <Strikethrough />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('> ', '', '> ')}
-          title="Blockquote"
-          aria-label="Blockquote"
-        >
-          <Quote />
-        </button>
-      </div>
-
-      <span className="format-divider" />
-
-      <div className="format-group" aria-label="Lists">
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('- ', '', '- ')}
-          title="Bulleted list"
-          aria-label="Bulleted list"
-        >
-          <List />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('1. ', '', '1. ')}
-          title="Numbered list"
-          aria-label="Numbered list"
-        >
-          <ListOrdered />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('- [ ] ', '', '- [ ] ')}
-          title="Task list"
-          aria-label="Task list"
-        >
-          <ListTodo />
-        </button>
-      </div>
-
-      <span className="format-divider" />
-
-      <div className="format-group" aria-label="Insert content">
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('[', '](https://example.com)')}
-          title="Link"
-          aria-label="Link"
-        >
-          <Link />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('![alt text](', ')')}
-          title="Image reference"
-          aria-label="Image"
-        >
-          <Image />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('`', '`')}
-          title="Inline code"
-          aria-label="Inline code"
-        >
-          <Code />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('```text\n', '\n```')}
-          title="Code block"
-          aria-label="Code block"
-        >
-          <CodeXml />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('$', '$')}
-          title="Inline math ($...$)"
-          aria-label="Inline math"
-        >
-          <span style={{ fontSize: '11px', fontFamily: 'serif', fontWeight: 600 }}>$x$</span>
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('\n$$\n', '\n$$\n')}
-          title="Display math equation ($$...$$)"
-          aria-label="Display math"
-        >
-          <Sigma size={16} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsertMarkdown('\n---\n', '', '', '')}
-          title="Horizontal rule"
-          aria-label="Horizontal rule"
-        >
-          <Minus />
-        </button>
-        <button
-          type="button"
-          onMouseDown={e => e.preventDefault()}
-          onClick={onInsertTable}
-          title="Table"
-          aria-label="Table"
-        >
-          <Table />
-        </button>
-      </div>
-
-      <span className="format-divider" />
-
-      {/* MDX Component Catalog dropdown */}
-      <div className="format-group mdx-menu-wrapper" ref={menuRef} aria-label="MDX Interactive Components">
-        <button
-          type="button"
-          className={`mdx-dropdown-trigger ${mdxMenuOpen ? 'active' : ''} ${!isMdx ? 'non-mdx' : ''}`}
-          onClick={() => setMdxMenuOpen(prev => !prev)}
-          title={isMdx ? 'Insert Interactive MDX Component' : 'MDX components (requires renaming document to .mdx for Astro interactivity)'}
-        >
-          <Component size={14} className="mdx-trigger-icon" />
-          <span className="mdx-trigger-text">MDX Components</span>
-          <ChevronDown size={12} className={`mdx-trigger-chevron ${mdxMenuOpen ? 'open' : ''}`} />
+          <Heading size={14} />
+          <span>Style</span>
+          <ChevronDown size={11} className="ribbon-chevron" />
         </button>
 
-        {mdxMenuOpen && (
-          <div className="mdx-dropdown-menu" role="menu">
-            <div className="mdx-dropdown-header">
-              <div className="mdx-header-title">
-                <Sparkles size={12} className="mdx-header-icon" />
-                <span>INTERACTIVE MDX COMPONENTS</span>
-              </div>
-              <span className="mdx-header-count">{filteredCatalog.length} available</span>
-            </div>
-
-            {!isMdx && (
-              <div className="mdx-non-mdx-hint">
-                <strong>Note:</strong> Active file is <code>.md</code>. Interactive widgets require <code>.mdx</code> in Astro.
-              </div>
-            )}
-
-            <div className="mdx-dropdown-search">
-              <Search size={13} className="mdx-search-icon" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search components (plot, slider, card, table)..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                onClick={e => e.stopPropagation()}
-                onKeyDown={e => {
-                  if (e.key === 'Escape') {
-                    setMdxMenuOpen(false);
-                  }
-                }}
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  className="mdx-search-clear"
-                  onClick={() => setSearchQuery('')}
-                  title="Clear search"
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-
-            <div className="mdx-items-container">
-              {filteredCatalog.length === 0 ? (
-                <div className="mdx-empty-results">
-                  No components match &ldquo;{searchQuery}&rdquo;
-                </div>
-              ) : (
-                filteredCatalog.map(item => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="mdx-dropdown-item"
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => handleSelectSnippet(item)}
-                    role="menuitem"
-                  >
-                    <div className="mdx-item-title">
-                      <strong>{item.name}</strong>
-                      <span className="mdx-item-badge">{item.category}</span>
-                    </div>
-                    <div className="mdx-item-desc">{item.description}</div>
-                  </button>
-                ))
-              )}
-            </div>
+        {headingMenuOpen && (
+          <div className="ribbon-menu headings-menu" role="menu">
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('# ', '');
+                setHeadingMenuOpen(false);
+              }}
+            >
+              <span className="heading-preview h1-preview">Heading 1</span>
+              <kbd className="ribbon-kbd">#</kbd>
+            </button>
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('## ', '');
+                setHeadingMenuOpen(false);
+              }}
+            >
+              <span className="heading-preview h2-preview">Heading 2</span>
+              <kbd className="ribbon-kbd">##</kbd>
+            </button>
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('### ', '');
+                setHeadingMenuOpen(false);
+              }}
+            >
+              <span className="heading-preview h3-preview">Heading 3</span>
+              <kbd className="ribbon-kbd">###</kbd>
+            </button>
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('#### ', '');
+                setHeadingMenuOpen(false);
+              }}
+            >
+              <span className="heading-preview h4-preview">Heading 4</span>
+              <kbd className="ribbon-kbd">####</kbd>
+            </button>
+            <div className="ribbon-menu-divider" />
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('> ', '');
+                setHeadingMenuOpen(false);
+              }}
+            >
+              <Quote size={13} />
+              <span>Blockquote</span>
+              <kbd className="ribbon-kbd">&gt;</kbd>
+            </button>
           </div>
         )}
       </div>
+
+      <div className="ribbon-divider" />
+
+      {/* 2. Inline Text Styles */}
+      <div className="ribbon-cluster inline-styles">
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertMarkdown('**', '**', undefined, 'bold text')}
+          title="Bold (Ctrl+B)"
+          aria-label="Bold"
+        >
+          <Bold size={13} />
+        </button>
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertMarkdown('*', '*', undefined, 'italic text')}
+          title="Italic (Ctrl+I)"
+          aria-label="Italic"
+        >
+          <Italic size={13} />
+        </button>
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertMarkdown('~~', '~~', undefined, 'strikethrough text')}
+          title="Strikethrough"
+          aria-label="Strikethrough"
+        >
+          <Strikethrough size={13} />
+        </button>
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertMarkdown('`', '`', undefined, 'code')}
+          title="Inline Code"
+          aria-label="Inline Code"
+        >
+          <Code size={13} />
+        </button>
+      </div>
+
+      <div className="ribbon-divider" />
+
+      {/* 3. Lists & Structure Dropdown */}
+      <div className="ribbon-cluster" ref={structureRef}>
+        <button
+          type="button"
+          className={`ribbon-dropdown-btn ${structureMenuOpen ? 'active' : ''}`}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => {
+            setStructureMenuOpen(o => !o);
+            setHeadingMenuOpen(false);
+            setMdxMenuOpen(false);
+          }}
+          title="Lists & Structural Elements"
+        >
+          <List size={14} />
+          <span>List</span>
+          <ChevronDown size={11} className="ribbon-chevron" />
+        </button>
+
+        {structureMenuOpen && (
+          <div className="ribbon-menu structure-menu" role="menu">
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('- ', '', '- ', 'list item');
+                setStructureMenuOpen(false);
+              }}
+            >
+              <List size={14} />
+              <span>Bullet List</span>
+              <kbd className="ribbon-kbd">-</kbd>
+            </button>
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('1. ', '', '1. ', 'first item');
+                setStructureMenuOpen(false);
+              }}
+            >
+              <ListOrdered size={14} />
+              <span>Numbered List</span>
+              <kbd className="ribbon-kbd">1.</kbd>
+            </button>
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('- [ ] ', '', '- [ ] ', 'task');
+                setStructureMenuOpen(false);
+              }}
+            >
+              <ListTodo size={14} />
+              <span>Task List</span>
+              <kbd className="ribbon-kbd">[ ]</kbd>
+            </button>
+            <div className="ribbon-menu-divider" />
+            <button
+              type="button"
+              className="ribbon-menu-item"
+              onClick={() => {
+                onInsertMarkdown('\n---\n\n', '');
+                setStructureMenuOpen(false);
+              }}
+            >
+              <Minus size={14} />
+              <span>Horizontal Rule</span>
+              <kbd className="ribbon-kbd">---</kbd>
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="ribbon-divider" />
+
+      {/* 4. Media & Insert Primitives */}
+      <div className="ribbon-cluster media-styles">
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertMarkdown('[', '](https://example.com)', undefined, 'link title')}
+          title="Insert Link (Ctrl+K)"
+          aria-label="Insert Link"
+        >
+          <LinkIcon size={13} />
+        </button>
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertMarkdown('![', '](/images/filename.png)', undefined, 'alt text')}
+          title="Insert Image"
+          aria-label="Insert Image"
+        >
+          <ImageIcon size={13} />
+        </button>
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertTable()}
+          title="Insert Markdown Table"
+          aria-label="Insert Table"
+        >
+          <TableIcon size={13} />
+        </button>
+        <button
+          type="button"
+          className="ribbon-icon-btn"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onInsertMarkdown('$', '$', undefined, 'E = mc^2')}
+          title="Insert KaTeX Math ($...$)"
+          aria-label="Insert Math"
+        >
+          <Sigma size={13} />
+        </button>
+      </div>
+
+      {/* 5. MDX Component Dropdown */}
+      {isMdx && (
+        <>
+          <div className="ribbon-divider" />
+          <div className="ribbon-cluster" ref={mdxRef}>
+            <button
+              type="button"
+              className={`ribbon-insert-mdx-btn ${mdxMenuOpen ? 'active' : ''}`}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => {
+                setMdxMenuOpen(o => !o);
+                setHeadingMenuOpen(false);
+                setStructureMenuOpen(false);
+              }}
+              title="Insert Interactive MDX Component"
+            >
+              <Plus size={13} />
+              <span>Insert Component</span>
+              <ChevronDown size={11} className="ribbon-chevron" />
+            </button>
+
+            {mdxMenuOpen && (
+              <div className="ribbon-menu mdx-palette-menu" role="dialog" aria-label="Insert Component Palette">
+                <div className="mdx-palette-search">
+                  <Search size={14} className="search-icon" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    placeholder="Search 13 scientific & interactive components…"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setMdxMenuOpen(false);
+                    }}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      className="search-clear-btn"
+                      onClick={() => setSearchQuery('')}
+                      aria-label="Clear search"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="mdx-palette-list">
+                  {filteredCatalog.length === 0 ? (
+                    <div className="mdx-palette-empty">No components matching "{searchQuery}"</div>
+                  ) : (
+                    filteredCatalog.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="mdx-palette-item"
+                        onClick={() => handleSelectSnippet(item)}
+                      >
+                        <div className="item-header">
+                          <span className="item-name">&lt;{item.name} /&gt;</span>
+                          <span className="item-category">{item.category}</span>
+                        </div>
+                        <p className="item-description">{item.description}</p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* 6. Zen / Focus Mode Toggle */}
+      {onToggleZenMode && (
+        <div className="ribbon-cluster ribbon-cluster-right">
+          <button
+            type="button"
+            className={`ribbon-icon-btn zen-btn ${zenMode ? 'active' : ''}`}
+            onClick={onToggleZenMode}
+            title={zenMode ? 'Exit Zen Mode (Show toolbars)' : 'Zen Mode (Distraction-free focus)'}
+            aria-label={zenMode ? 'Exit Zen Mode' : 'Enter Zen Mode'}
+          >
+            {zenMode ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

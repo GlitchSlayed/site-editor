@@ -34,9 +34,8 @@ import {
 } from './lib/storage';
 
 // Modular Components
-import { AppHeader } from './components/layout/AppHeader';
+import { StudioBar } from './components/layout/StudioBar';
 import { ContentSidebar, type Entry, type Environment } from './components/sidebar/ContentSidebar';
-import { EditorToolbar } from './components/editor/EditorToolbar';
 import { MetadataEditor } from './components/editor/MetadataEditor';
 import { MarkdownEditor } from './components/editor/MarkdownEditor';
 import { ArticlePreviewPane } from './components/preview/ArticlePreviewPane';
@@ -115,7 +114,8 @@ function App() {
   const [appAccent, setAppAccent] = useState(() => getStoredAccent());
   const [accentDraft, setAccentDraft] = useState(appAccent);
   const [appearanceDialog, setAppearanceDialog] = useState(false);
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [mode, setMode] = useState<'edit' | 'split' | 'preview'>('split');
+  const [zenMode, setZenMode] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [sidebar, setSidebar] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(() => getStoredMetadataOpen());
@@ -1064,18 +1064,6 @@ function App() {
 
   const content = selected ? (
     <>
-      <EditorToolbar
-        selected={selected}
-        dirty={dirty}
-        busy={busy}
-        mode={mode}
-        sourceMode={sourceMode}
-        hasSchemaIssues={schemaIssues.length > 0}
-        onSetMode={setMode}
-        onToggleSourceMode={() => setSourceMode(!sourceMode)}
-        onSave={save}
-      />
-
       {recoveredDraft && (
         <div className="draft-recovery-banner">
           <span>
@@ -1108,10 +1096,10 @@ function App() {
         </div>
       )}
 
-      <div className="workarea" ref={workarea}>
-        <div className="editor-column">
-          {mode === 'edit' && (
-            <>
+      <div className={`workarea ${zenMode ? 'workarea-zen' : ''}`} ref={workarea}>
+        {(mode === 'edit' || mode === 'split') && (
+          <div className="editor-column">
+            {!zenMode && (
               <MetadataEditor
                 selected={selected}
                 metadata={metadata}
@@ -1123,42 +1111,69 @@ function App() {
                 onFieldChange={setField}
                 onChooseImage={chooseImage}
               />
+            )}
 
-              <MarkdownEditor
-                selected={selected}
-                source={source}
-                body={body}
-                sourceMode={sourceMode}
-                isMdx={isMdx}
-                wordWrap={wordWrap}
-                wordsCount={wordsCount}
-                dropTarget={dropTarget}
-                editorialIssues={editorialIssues}
-                bodyEditorRef={bodyEditor}
-                sourceEditorRef={sourceEditor}
-                onSourceChange={val => {
-                  setSource(val);
-                  try {
-                    setMetadata(parseSiteDocument(val).metadata);
-                  } catch {}
-                  updateCursorPosition(sourceEditor.current);
-                }}
-                onBodyChange={val => {
-                  setSource(replaceMarkdownBody(source, val));
-                  updateCursorPosition(bodyEditor.current);
-                }}
-                onToggleWordWrap={() => setWordWrap(!wordWrap)}
-                onToggleSourceMode={() => setSourceMode(!sourceMode)}
-                onUpdateCursorPos={updateCursorPosition}
-                onInsertMarkdown={insertMarkdown}
-                onInsertTable={insertTable}
-                onInsertSnippet={insertSnippet}
-                onFixEmDashes={handleFixEmDashes}
-              />
-            </>
-          )}
+            <MarkdownEditor
+              selected={selected}
+              source={source}
+              body={body}
+              sourceMode={sourceMode}
+              isMdx={isMdx}
+              wordWrap={wordWrap}
+              wordsCount={wordsCount}
+              zenMode={zenMode}
+              dropTarget={dropTarget}
+              editorialIssues={editorialIssues}
+              bodyEditorRef={bodyEditor}
+              sourceEditorRef={sourceEditor}
+              onSourceChange={val => {
+                setSource(val);
+                try {
+                  setMetadata(parseSiteDocument(val).metadata);
+                } catch {}
+                updateCursorPosition(sourceEditor.current);
+              }}
+              onBodyChange={val => {
+                setSource(replaceMarkdownBody(source, val));
+                updateCursorPosition(bodyEditor.current);
+              }}
+              onToggleWordWrap={() => setWordWrap(!wordWrap)}
+              onToggleSourceMode={() => setSourceMode(!sourceMode)}
+              onToggleZenMode={() => setZenMode(!zenMode)}
+              onUpdateCursorPos={updateCursorPosition}
+              onInsertMarkdown={insertMarkdown}
+              onInsertTable={insertTable}
+              onInsertSnippet={insertSnippet}
+              onFixEmDashes={handleFixEmDashes}
+            />
+          </div>
+        )}
 
-          {mode === 'preview' && (
+        {mode === 'split' && (
+          <>
+            <div
+              className="pane-resize-handle"
+              role="separator"
+              aria-label="Resize editor and render preview"
+              tabIndex={0}
+              onPointerDown={startPaneResize}
+              onPointerMove={resizePanes}
+              onPointerUp={finishPaneResize}
+              onPointerCancel={finishPaneResize}
+            />
+            <ArticlePreviewPane
+              selected={selected}
+              metadata={metadata}
+              renderedHtml={rendered}
+              isMdx={isMdx}
+              previewWidth={previewWidth}
+              previewAssets={previewAssets}
+            />
+          </>
+        )}
+
+        {mode === 'preview' && (
+          <div className="editor-column preview-column-full">
             <section className="preview-page">
               <div className="eyebrow">ARTICLE PREVIEW · APPROXIMATION</div>
               <h1>{String(metadata.title || 'Untitled')}</h1>
@@ -1183,30 +1198,7 @@ function App() {
               <hr />
               <article className="prose-preview" dangerouslySetInnerHTML={{ __html: rendered }} />
             </section>
-          )}
-        </div>
-
-        {mode === 'edit' && (
-          <>
-            <div
-              className="pane-resize-handle"
-              role="separator"
-              aria-label="Resize editor and render preview"
-              tabIndex={0}
-              onPointerDown={startPaneResize}
-              onPointerMove={resizePanes}
-              onPointerUp={finishPaneResize}
-              onPointerCancel={finishPaneResize}
-            />
-            <ArticlePreviewPane
-              selected={selected}
-              metadata={metadata}
-              renderedHtml={rendered}
-              isMdx={isMdx}
-              previewWidth={previewWidth}
-              previewAssets={previewAssets}
-            />
-          </>
+          </div>
         )}
 
         {outlineOpen && (
@@ -1250,26 +1242,35 @@ function App() {
   );
 
   return (
-    <div className="app-shell">
-      <AppHeader
+    <div className={`app-shell ${zenMode ? 'app-shell-zen' : ''}`}>
+      <StudioBar
         repository={repository}
         recent={recent}
-        sidebar={sidebar}
-        dirty={dirty}
+        sidebar={!zenMode && sidebar}
         selectedTitle={selected?.title}
-        appAccent={appAccent}
+        selectedKind={selected?.kind}
+        selectedPath={selected?.path}
+        selectedDraft={selected?.draft}
+        dirty={dirty}
         busy={busy}
         schemaIssuesCount={schemaIssues.length}
         native={native}
         liveSiteUrl={LIVE_SITE_URL}
         theme={theme}
+        mode={mode}
+        sourceMode={sourceMode}
         outlineOpen={outlineOpen}
+        wordWrap={wordWrap}
+        onSetMode={setMode}
+        onSave={save}
+        onToggleSidebar={() => setSidebar(s => !s)}
         onToggleTheme={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+        onToggleSourceMode={() => setSourceMode(m => !m)}
         onToggleOutline={() => setOutlineOpen(o => !o)}
+        onToggleWordWrap={() => setWordWrap(w => !w)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         onSelectRecent={refreshRepository}
         onChooseRepository={chooseRepository}
-        onOpenSidebar={() => setSidebar(true)}
         onOpenAppearance={() => {
           setAccentDraft(appAccent);
           setAppearanceDialog(true);
@@ -1278,11 +1279,11 @@ function App() {
           setCommitMessage(`Update ${selected?.title || 'site content'}`);
           setPublishDialog(true);
         }}
-        onNotice={setNotice}
+        onFixEmDashes={handleFixEmDashes}
       />
 
       <div className="main-layout">
-        {sidebar && (
+        {!zenMode && sidebar && (
           <ContentSidebar
             entries={entries}
             selected={selected}
