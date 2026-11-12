@@ -32,6 +32,40 @@ describe('Editorial Rules & Audit Engine', () => {
     expect(issues.some(i => i.type === 'mdx-import')).toBe(false);
   });
 
+  it('correctly handles multi-line relative imports from components/mdx', () => {
+    const text = `import {
+  FunctionPlot,
+  ParamPlayground,
+  MetricCard,
+  MetricGrid,
+  DataTable,
+} from '../../components/mdx';
+
+<FunctionPlot title="Lift" />
+<ParamPlayground />
+<MetricCard title="Thrust" />
+<MetricGrid />
+<DataTable headers={[]} rows={[]} />
+`;
+    const issues = auditEditorialText(text, true);
+    expect(issues.some(i => i.type === 'mdx-import')).toBe(false);
+  });
+
+  it('identifies only the unimported components when partial imports exist', () => {
+    const text = `import { LinePlot } from '@components/mdx';\n\n<LinePlot title="Test" />\n<DataTable />`;
+    const issues = auditEditorialText(text, true);
+    const mdxIssue = issues.find(i => i.type === 'mdx-import');
+    expect(mdxIssue).toBeDefined();
+    expect(mdxIssue?.message).toContain('DataTable');
+    expect(mdxIssue?.message).not.toContain('LinePlot');
+  });
+
+  it('does not flag missing MDX imports when using namespace imports', () => {
+    const text = `import * as MDX from '@components/mdx';\n\n<FunctionPlot />`;
+    const issues = auditEditorialText(text, true);
+    expect(issues.some(i => i.type === 'mdx-import')).toBe(false);
+  });
+
   it('replaces all em dashes and double hyphens with clean hyphens', () => {
     const text = 'Airfoil testing—lift curve--stall region.';
     const fixed = fixAllEmDashes(text);

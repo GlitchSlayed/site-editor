@@ -100,16 +100,49 @@ export function auditEditorialText(text: string, isMdx = false): EditorialIssue[
     ];
 
     const usedComponents = knownMdxComponents.filter(comp => new RegExp(`<${comp}\\b`).test(text));
-    const hasMdxImport = /import\s+.*?\s+from\s+['"](@components\/mdx|.*?components\/mdx)['"]/.test(text);
 
-    if (usedComponents.length > 0 && !hasMdxImport) {
-      issues.push({
-        id: 'mdx-import-missing',
-        type: 'mdx-import',
-        severity: 'warning',
-        message: `MDX components used (${usedComponents.join(', ')}) but missing import from "@components/mdx".`,
-        replacement: `import { ${usedComponents.join(', ')} } from '@components/mdx';\n\n`,
-      });
+    if (usedComponents.length > 0) {
+      // Find all components imported from @components/mdx or relative path ending in components/mdx
+      // Handles single-line, multi-line, named imports, and default/wildcard imports
+      const importedComponents = new Set<string>();
+      let hasWildcardOrNamespaceImport = false;
+
+      const importRegex = /import\s+([\s\S]*?)\s+from\s+['"](@components\/mdx|.*?components\/mdx)['"]/g;
+      let match: RegExpExecArray | null;
+
+      while ((match = importRegex.exec(text)) !== null) {
+        const importClause = match[1].trim();
+        if (importClause.startsWith('*') || (!importClause.includes('{') && !importClause.includes('}'))) {
+          // Namespace import e.g. import * as MDX from ... or default import
+          hasWildcardOrNamespaceImport = true;
+          break;
+        }
+
+        const namedMatches = importClause.match(/\{([\s\S]*?)\}/);
+        if (namedMatches) {
+          const names = namedMatches[1]
+            .split(',')
+            .map(s => s.trim().split(/\s+as\s+/)[0]?.trim())
+            .filter(Boolean);
+          for (const name of names) {
+            importedComponents.add(name);
+          }
+        }
+      }
+
+      const missingComponents = hasWildcardOrNamespaceImport
+        ? []
+        : usedComponents.filter(comp => !importedComponents.has(comp));
+
+      if (missingComponents.length > 0) {
+        issues.push({
+          id: 'mdx-import-missing',
+          type: 'mdx-import',
+          severity: 'warning',
+          message: `MDX components used (${missingComponents.join(', ')}) but missing import from "@components/mdx".`,
+          replacement: `import { ${missingComponents.join(', ')} } from '@components/mdx';\n\n`,
+        });
+      }
     }
   }
 
