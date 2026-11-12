@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Feather,
   ChevronDown,
@@ -83,6 +83,35 @@ export const StudioBar: React.FC<StudioBarProps> = ({
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
   const [studioMenuOpen, setStudioMenuOpen] = useState(false);
 
+  useEffect(() => {
+    const handler = () => {
+      setRepoMenuOpen(false);
+      setStudioMenuOpen(false);
+    };
+    window.addEventListener('purpose:close-all-popovers', handler);
+    return () => window.removeEventListener('purpose:close-all-popovers', handler);
+  }, []);
+
+  const handleToggleRepoMenu = () => {
+    setRepoMenuOpen(o => {
+      if (!o) {
+        setStudioMenuOpen(false);
+        window.dispatchEvent(new CustomEvent('purpose:close-all-popovers'));
+      }
+      return !o;
+    });
+  };
+
+  const handleToggleStudioMenu = () => {
+    setStudioMenuOpen(o => {
+      if (!o) {
+        setRepoMenuOpen(false);
+        window.dispatchEvent(new CustomEvent('purpose:close-all-popovers'));
+      }
+      return !o;
+    });
+  };
+
   const repoName = repository.split('/').filter(Boolean).at(-1) || 'No Repository';
   const fileName = selectedPath?.split('/').filter(Boolean).at(-1) || '';
 
@@ -115,7 +144,7 @@ export const StudioBar: React.FC<StudioBarProps> = ({
             <button
               type="button"
               className={`studio-repo-btn ${repoMenuOpen ? 'active' : ''}`}
-              onClick={() => setRepoMenuOpen(o => !o)}
+              onClick={handleToggleRepoMenu}
               title={`Switch repository: ${repository}`}
             >
               <span className="studio-repo-dot" />
@@ -221,7 +250,7 @@ export const StudioBar: React.FC<StudioBarProps> = ({
           <button
             type="button"
             className={`studio-icon-btn studio-menu-trigger ${studioMenuOpen ? 'active' : ''}`}
-            onClick={() => setStudioMenuOpen(o => !o)}
+            onClick={handleToggleStudioMenu}
             title="Studio Controls & Preferences"
             aria-label="Studio Controls & Preferences"
           >

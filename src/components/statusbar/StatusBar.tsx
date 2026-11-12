@@ -113,8 +113,13 @@ export function StatusBar({
           <button
             type="button"
             className={`status-workflows-btn ${buildMenuOpen ? 'active' : ''}`}
-            onClick={() => setBuildMenuOpen(o => !o)}
-            disabled={!native || !repository || busy}
+            onClick={() => {
+              if (!buildMenuOpen) {
+                window.dispatchEvent(new CustomEvent('purpose:close-all-popovers'));
+              }
+              setBuildMenuOpen(o => !o);
+            }}
+            disabled={!repository || busy}
             title="Run Astro Check or Build"
           >
             <Hammer size={12} />

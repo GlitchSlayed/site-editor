@@ -50,7 +50,7 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
   const mdxRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Close menus on outside click or Escape
+  // Close menus on outside click or Escape or global close event
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Node;
@@ -71,11 +71,20 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
         setMdxMenuOpen(false);
       }
     }
+    function handleCloseAll() {
+      setHeadingMenuOpen(false);
+      setStructureMenuOpen(false);
+      setMdxMenuOpen(false);
+    }
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('click', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('purpose:close-all-popovers', handleCloseAll);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('click', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('purpose:close-all-popovers', handleCloseAll);
     };
   }, []);
 

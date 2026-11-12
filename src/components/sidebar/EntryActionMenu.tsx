@@ -33,11 +33,18 @@ export const EntryActionMenu: React.FC<EntryActionMenuProps> = ({
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
+    function handleCloseAll() {
+      onClose();
+    }
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('click', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('purpose:close-all-popovers', handleCloseAll);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('click', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('purpose:close-all-popovers', handleCloseAll);
     };
   }, [open, onClose]);
 
