@@ -74,10 +74,36 @@ pub fn effective_package_manager(root: &Path) -> (PackageManager, Option<String>
     (pm, None)
 }
 
+pub fn parse_version_triplet(ver_str: &str) -> Option<(u64, u64, u64)> {
+    let cleaned = ver_str.trim().trim_start_matches(|c: char| !c.is_ascii_digit());
+    let mut parts = cleaned.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+pub fn is_version_compatible(current: &str, required_req: &str) -> bool {
+    if required_req == "not specified" || required_req.trim().is_empty() {
+        return true;
+    }
+    let Some(cur) = parse_version_triplet(current) else {
+        return false;
+    };
+    let Some(req) = parse_version_triplet(required_req) else {
+        return true;
+    };
+    cur >= req
+}
+
 #[derive(Serialize)]
 pub struct Environment {
     pub package_manager: String,
     pub package_manager_version: String,
+    pub runtime: String,
+    pub runtime_version: String,
+    pub required_runtime: String,
+    pub runtime_compatible: bool,
     pub node_version: String,
     pub npm_version: String,
     pub required_node: String,
@@ -95,9 +121,14 @@ pub async fn environment(path: String) -> Result<Environment, String> {
 
         let package: serde_json::Value =
             serde_json::from_slice(&fs::read(root.join("package.json")).map_err(fail)?).map_err(fail)?;
-        let required = package
-            .get("engines")
+        let engines = package.get("engines");
+        let required_node = engines
             .and_then(|e| e.get("node"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("not specified")
+            .to_string();
+        let required_bun = engines
+            .and_then(|e| e.get("bun"))
             .and_then(|v| v.as_str())
             .unwrap_or("not specified")
             .to_string();
@@ -111,52 +142,93 @@ pub async fn environment(path: String) -> Result<Environment, String> {
             npm
         };
 
-        let major = node
-            .trim_start_matches('v')
-            .split('.')
-            .next()
-            .and_then(|v| v.parse::<u64>().ok());
-        let min_major = required
-            .trim_start_matches(|c: char| !c.is_ascii_digit())
-            .split('.')
-            .next()
-            .and_then(|v| v.parse::<u64>().ok());
-        let compatible = major.is_some() && min_major.map_or(true, |min| major.unwrap() >= min);
-        let dependencies = root.join("node_modules").is_dir();
         let mut messages = Vec::new();
-
         if let Some(msg) = fallback_msg {
             messages.push(msg);
         }
 
-        if node.is_empty() {
-            messages.push("Node.js is not available on this host.".into());
-            if let Some(error) = node_error {
-                messages.push(format!("Node.js check failed: {error}"));
-            }
-        } else if !compatible {
-            messages.push(format!("Detected Node.js {node}; this site requires {required}."));
-        }
+        let is_bun_native = pm == PackageManager::Bun;
+        let (runtime, runtime_version, required_runtime, runtime_compatible, node_compatible) =
+            if is_bun_native {
+                let bun_compat = is_version_compatible(&pm_ver, &required_bun);
+                let rt_compat = !pm_ver.is_empty() && bun_compat;
 
-        if pm_ver.is_empty() {
-            messages.push(format!("{pm_name} is not available on this host."));
-            if let Some(error) = pm_error {
-                messages.push(format!("{pm_name} check failed: {error}"));
-            }
-        }
+                if pm_ver.is_empty() {
+                    messages.push("Bun is not available on this host.".into());
+                    if let Some(error) = pm_error {
+                        messages.push(format!("Bun check failed: {error}"));
+                    }
+                } else if !bun_compat {
+                    messages.push(format!(
+                        "Detected Bun {pm_ver}; this site requires {required_bun}."
+                    ));
+                }
 
+                (
+                    "bun".to_string(),
+                    pm_ver.clone(),
+                    if required_bun != "not specified" {
+                        required_bun.clone()
+                    } else {
+                        "any".to_string()
+                    },
+                    rt_compat,
+                    rt_compat,
+                )
+            } else {
+                let node_compat = is_version_compatible(&node, &required_node);
+                let rt_compat = !node.is_empty() && node_compat;
+
+                if node.is_empty() {
+                    messages.push("Node.js is not available on this host.".into());
+                    if let Some(error) = node_error {
+                        messages.push(format!("Node.js check failed: {error}"));
+                    }
+                } else if !node_compat {
+                    messages.push(format!(
+                        "Detected Node.js {node}; this site requires {required_node}."
+                    ));
+                }
+
+                if pm_ver.is_empty() {
+                    messages.push(format!("{pm_name} is not available on this host."));
+                    if let Some(error) = pm_error {
+                        messages.push(format!("{pm_name} check failed: {error}"));
+                    }
+                }
+
+                (
+                    "node".to_string(),
+                    node.clone(),
+                    required_node.clone(),
+                    rt_compat,
+                    node_compat,
+                )
+            };
+
+        let dependencies = root.join("node_modules").is_dir();
         if !dependencies {
             messages.push("Site dependencies are not installed in this repository.".into());
         }
 
+        let reported_required_node = if is_bun_native && required_node == "not specified" {
+            format!("bun {}", required_bun)
+        } else {
+            required_node
+        };
+
         Ok(Environment {
             package_manager: pm_name,
             package_manager_version: pm_ver,
+            runtime,
+            runtime_version,
+            required_runtime,
+            runtime_compatible,
             node_version: node,
             npm_version: npm_ver,
-            required_node: required,
+            required_node: reported_required_node,
             dependencies_installed: dependencies,
-            node_compatible: compatible,
+            node_compatible,
             messages,
         })
     })

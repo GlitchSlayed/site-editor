@@ -80,7 +80,7 @@ pub async fn project_command(
         "build" => vec!["run", "build"],
         "install" => match pm {
             PackageManager::Bun => {
-                if root.join("bun.lock").is_file() {
+                if root.join("bun.lock").is_file() || root.join("bun.lockb").is_file() {
                     vec!["install", "--frozen-lockfile"]
                 } else {
                     vec!["install"]

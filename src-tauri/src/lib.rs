@@ -268,4 +268,14 @@ mod tests {
         let onload_svg = b"<svg onload=\"alert(1)\"></svg>";
         assert!(images::validate_image_magic_bytes(onload_svg, "svg").is_err());
     }
+
+    #[test]
+    fn bun_and_node_version_compatibility() {
+        assert!(env::is_version_compatible("1.4.4", ">=1.4.0"));
+        assert!(env::is_version_compatible("1.4.0", ">=1.4.0"));
+        assert!(!env::is_version_compatible("1.2.0", ">=1.4.0"));
+        assert!(env::is_version_compatible("v20.11.0", ">=18.0.0"));
+        assert!(env::is_version_compatible("1.4.4", "not specified"));
+        assert!(env::is_version_compatible("1.4.4", ""));
+    }
 }

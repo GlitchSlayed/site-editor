@@ -60,7 +60,7 @@ export function getProjectCommandArgs(
       case 'bun':
         return {
           program: 'bun',
-          args: fileSet.has('bun.lock') ? ['install', '--frozen-lockfile'] : ['install'],
+          args: fileSet.has('bun.lock') || fileSet.has('bun.lockb') ? ['install', '--frozen-lockfile'] : ['install'],
         };
       case 'pnpm':
         return {

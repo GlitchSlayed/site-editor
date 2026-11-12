@@ -34,7 +34,7 @@ flowchart TD
 Purpose matches the site's editorial design system:
 - **Warm Light Mode (Default)**: Archival Book Paper / Ivory Stock (`#F8F6F0` background, `#FFFFFF` surface, `#1C1B18` charcoal typography, `#DDD7C8` borders, `#B83E18` terracotta accents).
 - **Slate-Graphite Dark Mode**: Optional night edition (`#161614` background, `#1E1D1A` surface, `#EDE8DE` text, `#E25835` accent) with instant toggle (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd>).
-- **Typography**: Display serif (`Fraunces`), monograph body serif (`Newsreader`), clean sans (`Inter`), and monospace code (`IBM Plex Mono`).
+- **Typography**: Display serif (`Fraunces`), monograph body serif (`Newsreader`), clean sans (`Inter`), and monospace code (`IBM Plex Mono`), fully self-hosted locally via `@fontsource` packages with crisp subpixel antialiasing and zero external CDN latency.
 
 ---
 
@@ -71,7 +71,7 @@ Full snippet insertion, linting, and visual approximation cards for all 13 inter
 - Drag-and-drop local image insertion with automatic relative pathing into `images/`.
 
 ### 6. Package Manager & Schema Synchronization
-- **Multi-Package Manager Engine**: Auto-detects Bun (`bun.lock`/`bun.lockb`), PNPM (`pnpm-lock.yaml`), Yarn (`yarn.lock`), or npm (`package-lock.json`), executing isolated commands (`<pm> run check`, `<pm> run build`, `<pm> install`, `<pm> run dev`) with streaming log output and process group cancellation.
+- **Multi-Package Manager & Bun Native Engine**: Auto-detects Bun (`bun.lock`/`bun.lockb`), PNPM (`pnpm-lock.yaml`), Yarn (`yarn.lock`), or npm (`package-lock.json`), executing isolated commands (`<pm> run check`, `<pm> run build`, `<pm> install`, `<pm> run dev`) with streaming log output and process group cancellation. For pure Bun-native sites, validates `engines.bun` directly without requiring Node.js.
 - **Dynamic Content Schema**: Real AST extraction of `src/content.config.ts` synchronizing `PROJECT_STATUSES` (including `Released`), `PROJECT_DRAWINGS`, `art`, `visuals`, and `engineering` specifications across TypeScript and Rust.
 - **Data Safety Guarantees**:
   - **Draft Autosave Recovery**: Persists dirty editor buffers every 2 seconds, offering recovery upon reopening.

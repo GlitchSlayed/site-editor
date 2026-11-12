@@ -10,7 +10,7 @@
   <launchable type="desktop-id">com.glitchslayed.site-editor.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.3.0" date="2026-11-10"><description><p>Purpose 0.3.0 release: comprehensive stabilization, modular architecture, multi-package manager support (Bun, PNPM, Yarn, npm), real schema extraction from content.config.ts, streaming command output with cancellation, draft autosave recovery, conflict resolution modal, and OS trash integration.</p></description></release>
+    <release version="0.3.0" date="2026-11-12"><description><p>Purpose 0.3.0 release: comprehensive stabilization, modular architecture, full Bun-native site support with engines.bun semver checks and bun.lock/bun.lockb support, self-hosted offline font bundle with antialiasing, streaming command output with cancellation, draft autosave recovery, conflict resolution modal, and OS trash integration.</p></description></release>
     <release version="0.2.0" date="2026-11-10"><description><p>Purpose 0.2.0 major overhaul: archival book paper light mode default, dark mode toggle, multi-package manager support (Bun, PNPM, Yarn, npm), real schema extraction from content.config.ts, streaming command output with cancellation, draft autosave recovery, external modification conflict resolution modal, OS trash integration, and 60fps deferred preview rendering.</p></description></release>
     <release version="0.1.0" date="2026-10-24"><description><p>Initial local editor preview.</p></description></release>
   </releases>

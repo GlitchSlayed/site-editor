@@ -32,6 +32,10 @@ describe('package manager detection and arguments', () => {
       program: 'bun',
       args: ['install', '--frozen-lockfile'],
     });
+    expect(getProjectCommandArgs('bun', 'install', ['bun.lockb'])).toEqual({
+      program: 'bun',
+      args: ['install', '--frozen-lockfile'],
+    });
     expect(getProjectCommandArgs('bun', 'install', [])).toEqual({
       program: 'bun',
       args: ['install'],

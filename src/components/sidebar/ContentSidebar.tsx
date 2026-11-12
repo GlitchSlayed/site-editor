@@ -12,11 +12,15 @@ export interface Entry {
 export interface Environment {
   package_manager?: string;
   package_manager_version?: string;
-  node_version: string;
-  npm_version: string;
-  required_node: string;
+  runtime?: string;
+  runtime_version?: string;
+  required_runtime?: string;
+  runtime_compatible?: boolean;
+  node_version?: string;
+  npm_version?: string;
+  required_node?: string;
   dependencies_installed: boolean;
-  node_compatible: boolean;
+  node_compatible?: boolean;
   messages: string[];
 }
 
@@ -155,9 +159,8 @@ export const ContentSidebar: React.FC<ContentSidebarProps> = ({
                 <p key={m}>{m}</p>
               ))}
               {!environment.dependencies_installed &&
-                environment.node_version &&
-                (environment.package_manager_version || environment.npm_version) &&
-                environment.node_compatible && (
+                (environment.package_manager_version || environment.runtime_version || environment.npm_version) &&
+                (environment.runtime_compatible ?? environment.node_compatible ?? true) && (
                   <button onClick={onInstallDependencies} disabled={busy}>
                     Install site dependencies
                   </button>
