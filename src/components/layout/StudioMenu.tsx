@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 import {
   ListTree,
   FileCode,
@@ -45,31 +45,6 @@ export const StudioMenu: React.FC<StudioMenuProps> = ({
   onFixEmDashes,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    function handleCloseAll() {
-      onClose();
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('click', handleClickOutside);
-    document.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('purpose:close-all-popovers', handleCloseAll);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('click', handleClickOutside);
-      document.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('purpose:close-all-popovers', handleCloseAll);
-    };
-  }, [open, onClose]);
 
   if (!open) return null;
 

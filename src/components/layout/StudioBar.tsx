@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Feather,
   ChevronDown,
@@ -58,7 +58,7 @@ export const StudioBar: React.FC<StudioBarProps> = ({
   selectedDraft,
   dirty,
   busy,
-  schemaIssuesCount,
+  schemaIssuesCount: _schemaIssuesCount,
   native,
   liveSiteUrl,
   theme,
@@ -83,33 +83,49 @@ export const StudioBar: React.FC<StudioBarProps> = ({
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
   const [studioMenuOpen, setStudioMenuOpen] = useState(false);
 
+  const repoContainerRef = useRef<HTMLDivElement>(null);
+  const studioMenuContainerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const handler = () => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (repoContainerRef.current && !repoContainerRef.current.contains(target)) {
+        setRepoMenuOpen(false);
+      }
+      if (studioMenuContainerRef.current && !studioMenuContainerRef.current.contains(target)) {
+        setStudioMenuOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setRepoMenuOpen(false);
+        setStudioMenuOpen(false);
+      }
+    }
+    function handleCloseAll() {
       setRepoMenuOpen(false);
       setStudioMenuOpen(false);
+    }
+    document.addEventListener('pointerdown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('purpose:close-all-popovers', handleCloseAll);
+    return () => {
+      document.removeEventListener('pointerdown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('purpose:close-all-popovers', handleCloseAll);
     };
-    window.addEventListener('purpose:close-all-popovers', handler);
-    return () => window.removeEventListener('purpose:close-all-popovers', handler);
   }, []);
 
-  const handleToggleRepoMenu = () => {
-    setRepoMenuOpen(o => {
-      if (!o) {
-        setStudioMenuOpen(false);
-        window.dispatchEvent(new CustomEvent('purpose:close-all-popovers'));
-      }
-      return !o;
-    });
+  const handleToggleRepoMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setStudioMenuOpen(false);
+    setRepoMenuOpen(o => !o);
   };
 
-  const handleToggleStudioMenu = () => {
-    setStudioMenuOpen(o => {
-      if (!o) {
-        setRepoMenuOpen(false);
-        window.dispatchEvent(new CustomEvent('purpose:close-all-popovers'));
-      }
-      return !o;
-    });
+  const handleToggleStudioMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRepoMenuOpen(false);
+    setStudioMenuOpen(o => !o);
   };
 
   const repoName = repository.split('/').filter(Boolean).at(-1) || 'No Repository';
@@ -140,7 +156,7 @@ export const StudioBar: React.FC<StudioBarProps> = ({
         <span className="studio-breadcrumb-slash">/</span>
 
         {/* Repository selector */}
-        <div className="studio-repo-container">
+        <div className="studio-repo-container" ref={repoContainerRef}>
           {repository ? (
             <button
               type="button"
@@ -238,8 +254,8 @@ export const StudioBar: React.FC<StudioBarProps> = ({
             type="button"
             className="studio-btn studio-btn-save"
             onClick={onSave}
-            disabled={!dirty || busy || schemaIssuesCount > 0}
-            title="Save to disk (Ctrl+S)"
+            disabled={busy}
+            title={dirty ? 'Save to disk (Ctrl+S)' : 'Save to disk (Ctrl+S)'}
           >
             <Save size={13} />
             <span>Save</span>
@@ -247,7 +263,7 @@ export const StudioBar: React.FC<StudioBarProps> = ({
         )}
 
         {/* Overflow Studio Menu */}
-        <div className="studio-menu-container">
+        <div className="studio-menu-container" ref={studioMenuContainerRef}>
           <button
             type="button"
             className={`studio-icon-btn studio-menu-trigger ${studioMenuOpen ? 'active' : ''}`}
@@ -281,7 +297,7 @@ export const StudioBar: React.FC<StudioBarProps> = ({
           type="button"
           className="studio-btn studio-btn-publish"
           onClick={onOpenPublish}
-          disabled={!native || !repository || busy || schemaIssuesCount > 0}
+          disabled={!native || !repository || busy}
           title="Review diff and publish via Git"
         >
           <Send size={13} />
