@@ -14,7 +14,19 @@ export default defineConfig({
     },
   },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
-  build: { target: 'es2022' },
+  build: {
+    target: 'es2022',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-katex': ['katex'],
+          'vendor-markdown': ['marked', 'dompurify', 'yaml'],
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
+  },
   test: {
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/dist/**', 'build-dir/**', '.flatpak-builder/**', 'repo/**'],

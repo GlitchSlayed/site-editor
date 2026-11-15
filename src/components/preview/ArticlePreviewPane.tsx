@@ -52,9 +52,9 @@ export const ArticlePreviewPane: React.FC<ArticlePreviewPaneProps> = ({
           </div>
         )}
 
-        <header className="monograph-preview-header">
+        <header className="monograph-header">
           <div className="monograph-kicker-strip">
-            <span className="monograph-category">
+            <span className="monograph-kicker">
               {metadata.category
                 ? String(metadata.category).toUpperCase()
                 : selected.kind === 'Projects'
@@ -71,19 +71,30 @@ export const ArticlePreviewPane: React.FC<ArticlePreviewPaneProps> = ({
               </span>
             )}
           </div>
-          <h1 className="monograph-preview-title">{String(metadata.title || 'Untitled')}</h1>
+          <h1 className="monograph-title">{String(metadata.title || 'Untitled')}</h1>
           {metadata.description && (
-            <p className="monograph-preview-abstract">{String(metadata.description)}</p>
+            <p className="monograph-abstract">{String(metadata.description)}</p>
           )}
-          {Array.isArray(metadata.tags) && metadata.tags.length > 0 && (
-            <div className="monograph-preview-tags">
-              {(metadata.tags as string[]).map(t => (
-                <span key={t} className="preview-tag-pill">
-                  {t}
-                </span>
-              ))}
-            </div>
-          )}
+          <div className="monograph-meta-grid">
+            {Boolean(metadata.status) && (
+              <div className="meta-grid-item">
+                <span className="meta-grid-label">Status</span>
+                <span className="meta-grid-value">{String(metadata.status)}</span>
+              </div>
+            )}
+            {Boolean(metadata.stage) && (
+              <div className="meta-grid-item">
+                <span className="meta-grid-label">Stage</span>
+                <span className="meta-grid-value">{String(metadata.stage)}</span>
+              </div>
+            )}
+            {Array.isArray(metadata.tags) && metadata.tags.length > 0 && (
+              <div className="meta-grid-item">
+                <span className="meta-grid-label">Tags</span>
+                <span className="meta-grid-value">{(metadata.tags as string[]).join(' · ')}</span>
+              </div>
+            )}
+          </div>
         </header>
 
         <article

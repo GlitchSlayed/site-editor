@@ -159,6 +159,7 @@ mod tests {
     fn allowed_programs_rejects_unauthorized_binaries() {
         assert!(repo::ALLOWED_PROGRAMS.contains(&"git"));
         assert!(repo::ALLOWED_PROGRAMS.contains(&"bun"));
+        assert!(repo::ALLOWED_PROGRAMS.contains(&"bunx"));
         assert!(repo::ALLOWED_PROGRAMS.contains(&"pnpm"));
         assert!(repo::ALLOWED_PROGRAMS.contains(&"yarn"));
         assert!(repo::ALLOWED_PROGRAMS.contains(&"npm"));

@@ -13,6 +13,10 @@ describe('package manager detection and arguments', () => {
     expect(detectPackageManager({ packageManager: 'npm@10.5.0' })).toBe('npm');
   });
 
+  it('detects bun when engines.bun is specified', () => {
+    expect(detectPackageManager({ engines: { bun: '>=1.4.0' } })).toBe('bun');
+  });
+
   it('falls back to lockfiles when packageManager is absent', () => {
     expect(detectPackageManager({}, ['bun.lock'])).toBe('bun');
     expect(detectPackageManager({}, ['bun.lockb'])).toBe('bun');

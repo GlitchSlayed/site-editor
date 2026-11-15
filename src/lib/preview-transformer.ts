@@ -1,5 +1,19 @@
+import katex from 'katex';
+
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+export function renderMathBlock(tex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(tex, {
+      displayMode,
+      throwOnError: false,
+      output: 'html',
+    });
+  } catch {
+    return `<code class="${displayMode ? 'math-display-error' : 'math-inline-error'}">${escapeHtml(tex)}</code>`;
+  }
 }
 
 /**
@@ -21,7 +35,7 @@ export function transformTablePercentBadges(html: string): string {
 
 /**
  * Pre-processes Markdown before feeding to Marked.
- * Formats math blocks ($$ and $) and MDX custom components into safe HTML preview blocks.
+ * Formats math blocks ($$ and $) via KaTeX and MDX custom components into safe HTML preview blocks.
  */
 export function preProcessMarkdown(source: string): string {
   let md = source;
@@ -33,12 +47,15 @@ export function preProcessMarkdown(source: string): string {
   // Display math blocks $$ ... $$
   md = md.replace(/\$\$([\s\S]*?)\$\$/g, (_m, eq: string) => {
     const trimmed = eq.trim();
-    return `<div class="mdx-equation-preview"><div class="mdx-equation-math">${escapeHtml(trimmed)}</div></div>`;
+    const rendered = renderMathBlock(trimmed, true);
+    return `<div class="mdx-equation-preview"><div class="mdx-equation-math">${rendered}</div></div>`;
   });
 
   // Inline math $ ... $ (excluding newline or double $)
   md = md.replace(/(?<!\$)\$([^$\n]+)\$(?!\$)/g, (_m, eq: string) => {
-    return `<code class="math-inline">${escapeHtml(eq.trim())}</code>`;
+    const trimmed = eq.trim();
+    const rendered = renderMathBlock(trimmed, false);
+    return `<span class="math-inline">${rendered}</span>`;
   });
 
   // EngineeringNote visual cards
@@ -51,8 +68,10 @@ export function preProcessMarkdown(source: string): string {
   // EquationBlock visual cards
   md = md.replace(
     /<EquationBlock[\s\S]*?equation="([^"]*)"[\s\S]*?description="([^"]*)"[\s\S]*?\/>/g,
-    (_m, eq: string, desc: string) =>
-      `<div class="mdx-equation-preview"><div class="mdx-equation-math">${escapeHtml(eq)}</div><div class="mdx-equation-desc">${escapeHtml(desc)}</div></div>`
+    (_m, eq: string, desc: string) => {
+      const rendered = renderMathBlock(eq, true);
+      return `<div class="mdx-equation-preview"><div class="mdx-equation-math">${rendered}</div><div class="mdx-equation-desc">${escapeHtml(desc)}</div></div>`;
+    }
   );
 
   // Measurement visual cards

@@ -36,6 +36,11 @@ pub fn detect_package_manager(root: &Path) -> PackageManager {
                     return PackageManager::Npm;
                 }
             }
+            if let Some(engines) = val.get("engines") {
+                if engines.get("bun").is_some() {
+                    return PackageManager::Bun;
+                }
+            }
         }
     }
 

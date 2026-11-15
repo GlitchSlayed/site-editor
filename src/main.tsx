@@ -407,7 +407,15 @@ function App() {
     setCursorPos({ line, col });
   };
 
-  const deferredBody = useDeferredValue(body);
+  const [debouncedBody, setDebouncedBody] = useState(body);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedBody(body);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [body]);
+
+  const deferredBody = useDeferredValue(debouncedBody);
 
   const rendered = useMemo(() => {
     const preprocessed = preProcessMarkdown(deferredBody);

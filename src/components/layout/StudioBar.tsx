@@ -129,11 +129,12 @@ export const StudioBar: React.FC<StudioBarProps> = ({
           {sidebar ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
         </button>
 
-        <div className="studio-brand" title="Purpose — Archival Technical Monograph Studio">
+        <div className="studio-brand" title="Purpose — Technical Dispatch & Monograph Studio">
           <span className="studio-brand-mark">
-            <Feather size={15} />
+            <Feather size={14} />
           </span>
-          <span className="studio-brand-title">Purpose</span>
+          <span className="studio-brand-title">PURPOSE</span>
+          <span className="studio-brand-sub">STUDIO</span>
         </div>
 
         <span className="studio-breadcrumb-slash">/</span>

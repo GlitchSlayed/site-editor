@@ -5,7 +5,7 @@ use std::{
 };
 use serde::Deserialize;
 
-pub const ALLOWED_PROGRAMS: &[&str] = &["git", "node", "npm", "bun", "pnpm", "yarn"];
+pub const ALLOWED_PROGRAMS: &[&str] = &["git", "node", "npm", "bun", "bunx", "pnpm", "yarn"];
 
 #[derive(Deserialize)]
 pub struct PortalDocument {
@@ -129,12 +129,19 @@ pub fn resolve_host_binary(program: &str) -> String {
         return resolved.clone();
     }
 
-    let host_path = host_path_env();
-    let script = format!(
-        "export PATH=\"{host_path}:$PATH\"; command -v \"$1\" 2>/dev/null || which \"$1\" 2>/dev/null || true"
-    );
+    // Direct probe on host for standard user paths where $HOME expands on the host
+    let probe_script = r#"
+        for candidate in "$HOME/.bun/bin/$1" "$HOME/.local/bin/$1" "$HOME/.cargo/bin/$1" "$HOME/.yarn/bin/$1" "/usr/local/bin/$1" "/usr/bin/$1" "/bin/$1"; do
+            if [ -x "$candidate" ]; then
+                echo "$candidate"
+                exit 0
+            fi
+        done
+        command -v "$1" 2>/dev/null || which "$1" 2>/dev/null || true
+    "#;
+
     let output = Command::new("flatpak-spawn")
-        .args(["--host", "--watch-bus", "sh", "-c", &script, "--", program])
+        .args(["--host", "--watch-bus", "sh", "-c", probe_script, "--", program])
         .output();
 
     let resolved = match output {

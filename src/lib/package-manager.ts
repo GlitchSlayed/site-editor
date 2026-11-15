@@ -4,19 +4,21 @@ export interface PackageJsonLike {
   packageManager?: string;
   engines?: {
     node?: string;
+    bun?: string;
   };
 }
 
 /**
  * Detects the package manager from package.json and repository files.
  * Priority:
- * 1. package.json `packageManager` field (e.g. "bun@1.2.4", "pnpm@9.0.0")
- * 2. Lockfiles in repository root:
+ * 1. package.json `packageManager` field (e.g. "bun@1.4.4", "pnpm@9.0.0")
+ * 2. package.json `engines.bun` field -> bun
+ * 3. Lockfiles in repository root:
  *    - bun.lock or bun.lockb -> bun
  *    - pnpm-lock.yaml -> pnpm
  *    - yarn.lock -> yarn
  *    - package-lock.json -> npm
- * 3. Default: npm
+ * 4. Default: bun if bun.lock or bun engines, otherwise npm
  */
 export function detectPackageManager(
   packageJson: PackageJsonLike | null | undefined,
@@ -30,6 +32,8 @@ export function detectPackageManager(
     if (trimmed.startsWith('yarn')) return 'yarn';
     if (trimmed.startsWith('npm')) return 'npm';
   }
+
+  if (packageJson?.engines?.bun) return 'bun';
 
   const fileSet = new Set(existingFiles.map(f => f.toLowerCase()));
   if (fileSet.has('bun.lock') || fileSet.has('bun.lockb')) return 'bun';

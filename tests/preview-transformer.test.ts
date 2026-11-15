@@ -49,8 +49,10 @@ describe('preview transformer parity', () => {
     const md = 'Here is inline $E = mc^2$ and block math:\n\n$$\nq = \\frac{1}{2}\\rho v^2\n$$\n';
     const preprocessed = preProcessMarkdown(md);
 
-    expect(preprocessed).toContain('<code class="math-inline">E = mc^2</code>');
-    expect(preprocessed).toContain('<div class="mdx-equation-preview"><div class="mdx-equation-math">q = \\frac{1}{2}\\rho v^2</div></div>');
+    expect(preprocessed).toContain('class="math-inline"');
+    expect(preprocessed).toContain('class="katex"');
+    expect(preprocessed).toContain('class="mdx-equation-preview"');
+    expect(preprocessed).toContain('class="mdx-equation-math"');
   });
 
   it('pre-processes MDX components (EquationBlock, Measurement, EngineeringNote)', () => {
